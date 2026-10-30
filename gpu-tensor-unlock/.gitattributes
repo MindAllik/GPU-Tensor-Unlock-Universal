@@ -1,0 +1,17 @@
+# Default to LF line endings across source and Linux packaging files
+* text=auto eol=lf
+
+# Enforce CRLF for Windows batch scripts so cmd.exe byte offsets never break
+*.bat text eol=crlf
+
+# Enforce LF for shell scripts, Makefiles, and kernel sources
+*.sh text eol=lf
+Makefile text eol=lf
+Kbuild text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.py text eol=lf
+
+# Keep evidence files byte-identical on Windows and Linux clones
+/docs/evidence/ada2705/* -text
+/docs/evidence/rtx4090/* -text

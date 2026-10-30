@@ -1,0 +1,12 @@
+source/build/
+source/test-build/
+*.efi
+*.EFI
+*.obj
+*.rom
+*.bin
+*.key
+*.pem
+*.cer
+*.esl
+__pycache__/
