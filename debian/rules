@@ -10,7 +10,7 @@ ASSETS := $(CURDIR)/debian/gpu-unlock-build/assets
 	dh $@
 
 override_dh_auto_configure:
-	test "$$(cat VERSION)" = "$(DEB_VERSION_UPSTREAM)"
+	test "$$(sed -n 's/^\*\*Version: \([0-9.]*\)\*\*$$/\1/p' README.md)" = "$(DEB_VERSION_UPSTREAM)"
 
 override_dh_auto_build:
 	$(MAKE) INPUTS="$(GPU_UNLOCK_INPUTS)" ASSETS="$(ASSETS)" firmware

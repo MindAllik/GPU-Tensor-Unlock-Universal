@@ -1,4 +1,6 @@
-# RTX 4090 (AD102) speed-select unlock: experiment and results
+# RTX 4090 (AD102) Speed-Select Unlock: Experiment and Results
+
+> **Reference Upstream Report**: RTX 4090 (`10de:2684`, `AD102`) Linux validation report (source: **[elias-gaeros/gpu-unlock](https://github.com/elias-gaeros/gpu-unlock)**, commit `4ec490d49c1cc292c0b4cd5ce5a801b5d2c396dc`, Linux `7.2.4`, 450 W power limit).
 
 **An RTX 4090 unlock was demonstrated on 2026-10-23. FP16 and BF16 tensor
 throughput with FP32 accumulation approximately doubled, and the override
@@ -16,10 +18,11 @@ survived FLR, stock NVIDIA initialization and CUDA load.**
 The AD102 payload and the analysis needed to construct it come from
 **[TOTORONG/AD103_win_unlocker](https://huggingface.co/TOTORONG/AD103_win_unlocker)**.
 The Linux loader and boot packaging derive from
-**[Zagitta/gpu-unlock](https://github.com/Zagitta/gpu-unlock)**. This work
-integrates the public payload, adds AD102 asset selection and transaction checks,
-and measures the result on an RTX 4090. It does not claim original discovery of
-the AD102 chain.
+**[Zagitta/gpu-unlock](https://github.com/Zagitta/gpu-unlock)** and
+**[elias-gaeros/gpu-unlock](https://github.com/elias-gaeros/gpu-unlock)**. That
+upstream work integrated the public payload, added AD102 asset selection and
+transaction checks, and measured the result on an RTX 4090. It does not claim
+original discovery of the AD102 chain.
 
 This report covers one physical card and one successful cold power-on. Baseline
 measurements were collected before that successful power-on; this is a comparison
@@ -31,7 +34,7 @@ implementation before the publication cleanup. The cleaned module retains the
 normal `targets=` interface and has host-side validation; it has not yet had a
 separate hardware confirmation.
 
-The [evidence directory](docs/evidence/rtx4090/README.md) contains the original
+The [evidence directory](evidence/rtx4090/README.md) contains the original
 benchmark text and selected sanitized register-log excerpts. These excerpts
 support the principal result and do not constitute a complete machine log.
 
@@ -54,10 +57,10 @@ support the principal result and do not constitute a complete machine log.
 All nine generated assets matched the manifest's pins before the firmware run.
 The reproduced AD102 payload also matched the published generator and shipped
 payload byte-for-byte. Firmware integrity checks are implemented in
-[firmware/generate_v67.py](firmware/generate_v67.py),
-[firmware/extract_boot_assets.py](firmware/extract_boot_assets.py) and the
-[artifact manifest](firmware/artifacts-610.43.03.json). Licensing and the pinned
-upstream revision are recorded in [firmware/NOTICE.md](firmware/NOTICE.md).
+[firmware/generate_v67.py](../firmware/generate_v67.py),
+[firmware/extract_boot_assets.py](../firmware/extract_boot_assets.py) and the
+[artifact manifest](../firmware/artifacts-610.43.03.json). Licensing and the pinned
+upstream revision are recorded in [firmware/NOTICE.md](../firmware/NOTICE.md).
 
 ## 2. Mechanism: why no locally decrypted firmware was needed
 
@@ -161,14 +164,14 @@ after driver initialization and after CUDA benchmarks still showed FEAT PLM
 Xid/error was found in the collected kernel journal after confirmation.
 
 The evidence for these transitions is in
-[registers.txt](docs/evidence/rtx4090/registers.txt). A successful module load
+[registers.txt](evidence/rtx4090/registers.txt). A successful module load
 return alone is insufficient: per-card failures are logged without necessarily
 failing module initialization. The stage readbacks and independent samples are
 what establish this result.
 
 ## 4. Benchmark method and limits
 
-The [CUDA benchmark](diagnostics/bench/mma_bench.cu) measures instruction issue
+The [CUDA benchmark](../diagnostics/bench/mma_bench.cu) measures instruction issue
 throughput rather than end-to-end GEMM or an application. Its loops keep operands
 and accumulators in registers, with no memory traffic inside the timed loop:
 
@@ -209,9 +212,9 @@ The accumulator results are only kept live to inhibit compiler elimination;
 the program does not compare numerical results to a reference.
 
 The full principal samples are retained in
-[baseline.txt](docs/evidence/rtx4090/baseline.txt),
-[unlocked-20000.txt](docs/evidence/rtx4090/unlocked-20000.txt) and
-[unlocked-40000.txt](docs/evidence/rtx4090/unlocked-40000.txt).
+[baseline.txt](evidence/rtx4090/baseline.txt),
+[unlocked-20000.txt](evidence/rtx4090/unlocked-20000.txt) and
+[unlocked-40000.txt](evidence/rtx4090/unlocked-40000.txt).
 
 | Mode | Baseline runs | Unlocked 20k runs | Unlocked 40k runs |
 |---|---|---|---|
@@ -309,11 +312,12 @@ unaligned length while checking its rounded bounds.
 
 ## 6. Public module behavior and reproduction
 
-The [README](README.md) describes package installation and the normal boot
+The [README](../README.md) describes package installation and the normal boot
 interface. `gpu_unlock.targets=` is the opt-in. RTX 4090 `10de:2684` selects
 AD102 assets automatically; legacy accepted GA102/GA104 IDs keep their original
-path. Other Ada IDs are rejected. A common Ada booter archive is not evidence
-that this module is safe or effective on every Ada chip.
+path. Guarded AD103/AD104/Ada IDs require their family flag and a single BDF. A
+common Ada booter archive is not evidence that this module is safe or effective
+on every Ada chip.
 
 The module requires an unbound, powered card with bus mastering off and an
 eligible since-power-on firmware state. It stops before selector application
@@ -361,15 +365,16 @@ FP32-accumulate throughput on its RTX 4080/AD103 setup. Those external results
 are attribution and context; the measurements above are the RTX 4090 result.
 
 The Linux module derives from
-[Zagitta/gpu-unlock](https://github.com/Zagitta/gpu-unlock), whose GA102 V67
+[Zagitta/gpu-unlock](https://github.com/Zagitta/gpu-unlock) and
+[elias-gaeros/gpu-unlock](https://github.com/elias-gaeros/gpu-unlock), whose GA102 V67
 lineage includes
 [WildFlash1st/cmp90hx-unlock](https://github.com/WildFlash1st/cmp90hx-unlock).
 Nouveau's Falcon and GSP loader code, NVIDIA's published open-module source and
 [envytools](https://github.com/envytools/envytools) informed the loading and
 register investigation. Source provenance, pinned hashes and preserved GPL/MIT
-notices are in [firmware/NOTICE.md](firmware/NOTICE.md),
-[firmware/artifacts-610.43.03.json](firmware/artifacts-610.43.03.json) and
-[licenses/](licenses/). NVIDIA firmware retains its own license terms.
+notices are in [firmware/NOTICE.md](../firmware/NOTICE.md),
+[firmware/artifacts-610.43.03.json](../firmware/artifacts-610.43.03.json) and
+[licenses/](../licenses/). NVIDIA firmware retains its own license terms.
 
 The next useful checks are an independent cold-power-on reproduction using the
 cleaned module, a representative numerical workload with reference comparisons,

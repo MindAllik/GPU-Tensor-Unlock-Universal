@@ -634,7 +634,7 @@ class UniversalUnlockApp(tk.Tk):
         if die in core_detector.CHIP_BY_PMC:
             chip_id, is_ada = core_detector.CHIP_BY_PMC[die]
             self.var_chip_id.set(f"0x{chip_id:08x}")
-            arch_str = "Ada Lovelace (4-PLM)" if is_ada else "Ampere GA10x (1-PLM)"
+            arch_str = "Turing TU10x (2-PLM)" if die.startswith("TU10") else ("Ada Lovelace (4-PLM)" if is_ada else "Ampere GA10x (1-PLM)")
             self.lbl_arch_tag.configure(
                 text=f"{arch_str} [{tier}]",
                 fg=FG_GREEN if tier == "hardware_tested" else (FG_CYAN if tier == "experimental_simulated" else FG_AMBER),
@@ -728,7 +728,7 @@ class UniversalUnlockApp(tk.Tk):
                             f"VRAM={info['vram_mib']} MiB | ESP={info['esp_guid']} ({info['esp_disk_part']})"
                         )
                     else:
-                        self.log("[WARN] No supported NVIDIA Ada/Ampere GPU detected on this host.")
+                        self.log("[WARN] No supported NVIDIA Ada/Ampere/Turing GPU detected on this host.")
                     if info.get("esp_ambiguous"):
                         self.log("[WARN] Multiple EFI System Partitions detected; verify the selected ESP GUID before building.")
                     if info.get("bitlocker_protection_on"):

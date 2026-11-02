@@ -20,7 +20,7 @@ static int sec2_snapshot(struct unlock_transaction_work *work, const char *phase
 		{0x84080c,"PSEC_MAILBOX2"}, {0x840810,"PSEC_MAILBOX3"},
 		{0x841668,"BCR_CTRL"}, {0x841180,"MOD_SEL"},
 		{0x841198,"BROM_CURR_UCODE_ID"}, {0x84119c,"BROM_ENGIDMASK"},
-		{0x841210,"BROM_PARAADDR0"}, {0x823804,"FEAT_PLM"},
+		{0x841210,"BROM_PARAADDR0"}, {GU_FEAT_PLM_OFFSET,"FEAT_PLM"},
 		{0x1fa7cc,"WPR_CFG_PLM"}, {0x9a0148,"FBPA_PLM"},
 		{0x1fa7c4,"WPR_PLM"}, {0x1fa824,"WPR2_LOW"}, {0x1fa828,"WPR2_HIGH"},
         {0x823b00,"SOURCE_ENABLE_CANDIDATE_RAW"},

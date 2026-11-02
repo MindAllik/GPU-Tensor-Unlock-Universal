@@ -109,6 +109,19 @@ int main(int argc, char **argv)
 	ampere_hdr.patch_loc = 35344;
 	assert(!gpu_unlock_booter_validate(GU_BOOTER_GA10X, &ampere_hdr, 60416, 768));
 	assert(gpu_unlock_booter_validate(GU_BOOTER_AD10X, &ampere_hdr, 60416, 768) == -EINVAL);
+	{
+		struct gpu_unlock_booter_hdr turing_hdr = {
+			.os_code_off = 0, .os_code_size = 256,
+			.os_data_off = 34048, .os_data_size = 25088,
+			.num_apps = 1, .app_code_off = 256, .app_code_size = 33792,
+			.app_data_off = 256, .app_data_size = 0,
+			.patch_loc = 34560, .ucode_id = 3, .engine_id = 1,
+			.num_sigs = 1, .sig_bytes = 16,
+		};
+		assert(!gpu_unlock_booter_validate(GU_BOOTER_TU10X, &turing_hdr, 59136, 16));
+		assert(gpu_unlock_booter_validate(GU_BOOTER_AD10X, &turing_hdr, 59136, 16) == -EINVAL);
+		assert(gpu_unlock_booter_geometry_match(&turing_hdr, GU_BOOTER_IMAGE_SIZE_TU102, GU_BOOTER_SIG_TOTAL_TU102));
+	}
 	assert(gpu_unlock_booter_validate(GU_BOOTER_AD10X, &ada_hdr, ~0u, 768) == -EINVAL);
 	assert(gpu_unlock_booter_validate(GU_BOOTER_AD10X, &ada_hdr, 56832, 384) == -EINVAL);
 	assert(gpu_unlock_booter_validate(GU_BOOTER_AD10X, NULL, 56832, 768) == -EINVAL);

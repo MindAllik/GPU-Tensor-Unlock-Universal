@@ -9,8 +9,5 @@
 [    1.418011] kernel: pci 0000:01:00.0: AD102 payload result: boot=0 halt=0 marker=0x67b00001 expected=0x67b00001 marker_ok=1 required_permissions=1 cpuctl=0x10 halted=1 debug=0xda550000 ss0=0x0 ss1=0x0
 [    1.904581] kernel: pci 0000:01:00.0: post-FLR SEC2 reset released, GSP halted, BME=0 pending=0 WPR2=1ffffe00:00000000 SS0=88888888 SS1=00000008
 [    1.921906] kernel: pci 0000:01:00.0: gpu_unlock: unlocked
-EFI: LoaderEntryDefault=meowos-ada-canary.conf; LoaderEntryOneShot=absent
 # Independent NVIDIA RM readback after the persistent-default boot:
 FMLA32=0 (full), IMLA2=0 (full), IMLA4=0 (full)
-# Owner miner after that boot:
-[2026-10-23 22:24:09] accepted (1/0)	GPU#0	(133 ms)

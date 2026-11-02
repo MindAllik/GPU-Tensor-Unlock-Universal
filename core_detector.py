@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 """Universal Hardware Inspector, Firmware Asset Builder, and UEFI Compiler
-for NVIDIA Ada Lovelace (AD10x) & Ampere (GA10x) GPUs on Windows 10 / 11."""
+for NVIDIA Ada Lovelace (AD10x), Ampere (GA10x) & Turing (TU10x) GPUs on Windows 10 / 11."""
 
 from __future__ import annotations
 
@@ -39,6 +39,9 @@ CHIP_BY_PMC: dict[str, tuple[int, bool]] = {
     "GA103": (0x173000A1, False),
     "GA104": (0x174000A1, False),
     "GA106": (0x176000A1, False),
+    "TU102": (0x162000A1, False),
+    "TU104": (0x164000A1, False),
+    "TU106": (0x166000A1, False),
 }
 
 # Explicit versioned allowlist of desktop Ada Lovelace (AD10x) & Ampere (GA10x) PCI Device IDs.
@@ -78,6 +81,22 @@ SUPPORT_MATRIX: dict[int, tuple[str, int, bool, str, str]] = {
     0x2489: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti LHR"),
     0x2503: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3060"),
     0x2504: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3060 LHR"),
+    # Experimental / simulated desktop Turing (RTX 20-series / CMP) SKUs
+    0x1E04: ("TU102", 0x162000A1, False, "experimental_simulated", "GeForce RTX 2080 Ti"),
+    0x1E07: ("TU102", 0x162000A1, False, "experimental_simulated", "GeForce RTX 2080 Ti Rev. A"),
+    0x1E02: ("TU102", 0x162000A1, False, "experimental_simulated", "NVIDIA TITAN RTX"),
+    0x1E09: ("TU102", 0x162000A1, False, "experimental_simulated", "NVIDIA CMP 50HX"),
+    0x1E81: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2080 SUPER"),
+    0x1E82: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2080"),
+    0x1E87: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2080 Rev. A"),
+    0x1E84: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2070 SUPER"),
+    0x1F02: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2070"),
+    0x1F07: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2070 Rev. A"),
+    0x1F06: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 SUPER"),
+    0x1F47: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 SUPER (TU106)"),
+    0x1F08: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 6GB"),
+    0x1F03: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 12GB"),
+    0x1F0B: ("TU106", 0x166000A1, False, "experimental_simulated", "NVIDIA CMP 40HX"),
 }
 
 
@@ -87,14 +106,17 @@ def classify_pci_device(device_id_16: int, gpu_name: str = "", sm_version: str =
     is_mobile_hint = any(tok in name_up for tok in ("LAPTOP", "MOBILE", "MAX-Q"))
     if device_id_16 in SUPPORT_MATRIX and not is_mobile_hint:
         die, chip_id, is_ada, tier, model = SUPPORT_MATRIX[device_id_16]
-        if sm_version and ((is_ada and sm_version != "sm_89") or (not is_ada and sm_version != "sm_86")):
+        is_turing = die.startswith("TU10")
+        expected_sm = "sm_75" if is_turing else ("sm_89" if is_ada else "sm_86")
+        if sm_version and sm_version != expected_sm:
             return {
                 "supported": False,
                 "support_tier": "unsupported",
                 "die_name": "UNSUPPORTED",
                 "chip_id": 0,
                 "is_ada": False,
-                "reason": f"Compute capability {sm_version} conflicts with PCI ID 0x{device_id_16:04x}",
+                "is_turing": False,
+                "reason": f"Compute capability {sm_version} conflicts with PCI ID 0x{device_id_16:04x} (expected {expected_sm})",
             }
         return {
             "supported": True,
@@ -102,6 +124,7 @@ def classify_pci_device(device_id_16: int, gpu_name: str = "", sm_version: str =
             "die_name": die,
             "chip_id": chip_id,
             "is_ada": is_ada,
+            "is_turing": is_turing,
             "model_hint": model,
             "reason": "OK",
         }
@@ -111,6 +134,7 @@ def classify_pci_device(device_id_16: int, gpu_name: str = "", sm_version: str =
         "die_name": "UNSUPPORTED",
         "chip_id": 0,
         "is_ada": False,
+        "is_turing": False,
         "reason": f"PCI Device ID 0x{device_id_16:04x} ({gpu_name or 'unknown'}) is not in SUPPORT_MATRIX",
     }
 
@@ -136,6 +160,14 @@ ASSET_SPECS_GA = {
     "gsp_boot_desc_ga102.bin": (84, "cc5a3fc1f4c47f2fe107b1b68f0176d8a448e6dec84b575e5560ccef5262bf15"),
 }
 
+ASSET_SPECS_TU = {
+    "booter_load_tu102.bin": (59224, "a5cd2eb6a92f343003eb3da67905318dc24f59f77dc02fb48b6389098fbffdb5"),
+    "v67-tu102-610.43.03.bin": (64000, "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024"),
+    "gsp_tu10x.bin": (46778072, "d9d9e0f23ccaa9f82e6879c97a7fb0962a421f7b713ba9ff2169641d34ef47be"),
+    "gsp_boot_tu102.bin": (16384, "b2bdccbb79ad4dd48d85c35b00d9ccdf34625bd323805be3f9045a4a24d09fa5"),
+    "gsp_boot_desc_tu102.bin": (84, "d66ab92e021b08d58045569df6956ef1bc742c57e7b31736b172578df87eb0e8"),
+}
+
 SOURCE_C_FILES = {
     "g_bindata_kgspGetBinArchiveBooterLoadUcode_AD102.c": (
         "0504f640bc36d03c3b617b1d80cf6eee1c8022cdfffb52ed22405aaa316a1460",
@@ -152,6 +184,14 @@ SOURCE_C_FILES = {
     "g_bindata_kgspGetBinArchiveGspRmBoot_GA102.c": (
         "35e5aa9075ad3898b6022ffd5820c953d809caa7dabd530cfc1a83dc2a67c5bd",
         "https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/452cec62d827034798072827d3866d1881662b77/src/nvidia/generated/g_bindata_kgspGetBinArchiveGspRmBoot_GA102.c",
+    ),
+    "g_bindata_kgspGetBinArchiveBooterLoadUcode_TU102.c": (
+        "4f894b21139bc52f713fb0e78b7e3489054463689c3eb993ec6a6f598d7ef9aa",
+        "https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/452cec62d827034798072827d3866d1881662b77/src/nvidia/generated/g_bindata_kgspGetBinArchiveBooterLoadUcode_TU102.c",
+    ),
+    "g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c": (
+        "5185662535c9c55ffcb1a67698db5ca4fc852aa9ab1746072855bd1839c73742",
+        "https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/452cec62d827034798072827d3866d1881662b77/src/nvidia/generated/g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c",
     ),
 }
 
@@ -211,7 +251,48 @@ AD102_PATCHED_WORDS = {
 }
 
 
-def build_v67_payload(is_ada: bool = True) -> bytes:
+TU102_PATCHED_WORDS = {
+    0x1100: 0x00000007,
+    0xF938: 0x00006140,
+    0xF940: 0x001FA7CC,
+    0xF944: 0xFFFFF0FF,
+    0xF94C: 0x000010B9,
+    0xF950: 0x00006140,
+    0xF958: 0x00409650,
+    0xF95C: 0xFFFFFFFF,
+    0xF964: 0x000010B9,
+    0xF968: 0x00006140,
+    0xF970: 0x00409650,
+    0xF974: 0xFFFFFFFF,
+    0xF97C: 0x000010B9,
+    0xF980: 0x00006140,
+    0xF988: 0x00409650,
+    0xF98C: 0xFFFFFFFF,
+    0xF994: 0x000010B9,
+    0xF998: 0x00006140,
+    0xF9A0: 0x00409650,
+    0xF9A4: 0xFFFFFFFF,
+    0xF9AC: 0x000010B9,
+    0xF9B0: 0x00006140,
+    0xF9B8: 0x00409650,
+    0xF9BC: 0xFFFFFFFF,
+    0xF9C4: 0x000010B9,
+    0xF9C8: 0x00006140,
+    0xF9D4: 0x00000003,
+    0xF9DC: 0x00006521,
+    0xF9E0: 0x00007F27,
+    0xF9EC: 0x00000CCB,
+    0xF9F0: 0x00007EA4,
+}
+
+
+def build_v67_payload(is_ada: bool = True, arch: str | None = None) -> bytes:
+    if arch == "tu102" or (isinstance(is_ada, str) and is_ada.lower() == "tu102"):
+        word = (0x000004A7).to_bytes(4, "little")
+        payload = bytearray(word * (0xFA00 // 4))
+        for offset, value in TU102_PATCHED_WORDS.items():
+            payload[offset : offset + 4] = value.to_bytes(4, "little")
+        return bytes(payload)
     word = (0x0000019C).to_bytes(4, "little")
     payload = bytearray(word * (0xFA00 // 4))
     table = AD102_PATCHED_WORDS if is_ada else GA102_PATCHED_WORDS
@@ -322,7 +403,7 @@ def validate_target_profile(config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(support["reason"])
 
     subsys_id = _parse_hex_int(config.get("subsystem_id_hex", ""), "subsystem_id_hex", 1, 0xFFFFFFFF)
-    chip_id = _parse_hex_int(config.get("chip_id_hex", ""), "chip_id_hex", 0x170000A1, 0x19F000A1)
+    chip_id = _parse_hex_int(config.get("chip_id_hex", ""), "chip_id_hex", 0x160000A1, 0x19F000A1)
     die_name = str(config.get("die_name", "")).strip()
     if die_name not in CHIP_BY_PMC:
         raise ValueError(f"Unsupported die_name: {die_name!r}")
@@ -337,6 +418,7 @@ def validate_target_profile(config: dict[str, Any]) -> dict[str, Any]:
             f"Chip ID mismatch for {die_name} (PCI 0x{dev16:04x}): expected {support['chip_id']:#010x}, got {chip_id:#010x}"
         )
     is_ada = support["is_ada"]
+    is_turing = support.get("is_turing", False)
 
     seg = _parse_hex_int(config.get("segment_hex", 0), "segment_hex", 0, 0xFFFF)
     bus = _parse_hex_int(config.get("bus_hex", ""), "bus_hex", 0, 0xFF)
@@ -368,6 +450,7 @@ def validate_target_profile(config: dict[str, Any]) -> dict[str, Any]:
         "gpu_name": str(config.get("gpu_name") or support["model_hint"]),
         "die_name": die_name,
         "is_ada": is_ada,
+        "is_turing": is_turing,
         "support_tier": support["support_tier"],
         "board_id": board_id,
         "subsys_id": subsys_id,
@@ -531,6 +614,10 @@ NOMINAL_VRAM_MIB: dict[int, int] = {
     0x2208: 12288, 0x220A: 12288, 0x2216: 10240, 0x2414: 8192,
     0x2482: 8192, 0x2484: 8192, 0x2486: 8192, 0x2487: 12288,
     0x2488: 8192, 0x2489: 8192, 0x2503: 12288, 0x2504: 12288,
+    0x1E04: 11264, 0x1E07: 11264, 0x1E02: 24576, 0x1E09: 10240,
+    0x1E81: 8192, 0x1E82: 8192, 0x1E87: 8192, 0x1E84: 8192,
+    0x1F02: 8192, 0x1F07: 8192, 0x1F06: 8192, 0x1F47: 8192,
+    0x1F08: 6144, 0x1F03: 12288, 0x1F0B: 8192,
 }
 
 
@@ -547,6 +634,8 @@ def get_linux_modprobe_command_for_gpu(gpu: dict[str, Any]) -> str:
     cls = classify_pci_device(dev16, str(gpu.get("gpu_name") or ""))
     if not cls["supported"]:
         return "UNSUPPORTED"
+    if cls.get("is_turing"):
+        return f"modprobe gpu_unlock targets={bdf} turing_experimental=1"
     if not cls["is_ada"] or dev16 == 0x2684:
         return f"modprobe gpu_unlock targets={bdf}"
     if dev16 in (0x2702, 0x2704, 0x2705, 0x2709):
@@ -569,6 +658,8 @@ def get_linux_boot_option_for_gpu(gpu: dict[str, Any]) -> str:
     cls = classify_pci_device(dev16, str(gpu.get("gpu_name") or ""))
     if not cls["supported"]:
         return "UNSUPPORTED"
+    if cls.get("is_turing"):
+        return f"gpu_unlock.targets={bdf} gpu_unlock.turing_experimental=1"
     if not cls["is_ada"] or dev16 == 0x2684:
         return f"gpu_unlock.targets={bdf}"
     if dev16 in (0x2702, 0x2704, 0x2705, 0x2709):
@@ -1443,11 +1534,11 @@ def build_booter_bundle(source_text: str) -> bytes:
 
 
 def _find_shared_cached_file(filename: str, expected_sha256: str, log_fn: Callable[[str], None] | None = None) -> Path | None:
-    """Check persistent user cache folders (~/.cache/gpu-tensor-unlock and ~/.cache/kohak-rtx4070ti)
+    """Check persistent user cache folders (~/.cache/gpu-tensor-unlock and ~/.cache/gpu-unlock/inputs)
     so unpacking a new ZIP never re-downloads 285 MB if already downloaded earlier on this PC."""
     for cand_dir in (
         Path.home() / ".cache" / "gpu-tensor-unlock",
-        Path.home() / ".cache" / "kohak-rtx4070ti",
+        Path.home() / ".cache" / "gpu-unlock" / "inputs",
     ):
         cand = cand_dir / filename
         try:
@@ -1491,7 +1582,7 @@ def download_verified(url: str, dest: Path, expected_sha256: str, log_fn: Callab
         except Exception:
             return shared_hit
 
-    req = urllib.request.Request(url, headers={"User-Agent": "GPU-Tensor-Unlock-Universal/2.2"})
+    req = urllib.request.Request(url, headers={"User-Agent": "GPU-Tensor-Unlock-Universal"})
     fd, tmp_name = tempfile.mkstemp(prefix=dest.name + ".", suffix=".part", dir=str(dest.parent))
     tmp = Path(tmp_name)
     total_read = 0
@@ -1540,8 +1631,8 @@ def download_verified(url: str, dest: Path, expected_sha256: str, log_fn: Callab
     return dest
 
 
-def extract_gsp_from_zst(pkg_path: Path, dest_gsp: Path) -> None:
-    member = "usr/lib/firmware/nvidia/610.43.03/gsp_ga10x.bin"
+def extract_gsp_from_zst(pkg_path: Path, dest_gsp: Path, member_name: str = "gsp_ga10x.bin") -> None:
+    member = f"usr/lib/firmware/nvidia/610.43.03/{member_name}"
     try:
         import zstandard as zstd  # type: ignore
         with pkg_path.open("rb") as fh:
@@ -1630,8 +1721,9 @@ def build_and_stage_usb(
             raise ValueError(f"USB drive {matched_drive['letter']} is formatted as {matched_drive['filesystem']}; FAT32 is required for UEFI boot.")
 
     is_ada = validated["is_ada"]
-    chip_tag = "ad102" if is_ada else "ga102"
-    specs = ASSET_SPECS_ADA if is_ada else ASSET_SPECS_GA
+    is_turing = validated.get("is_turing", False)
+    chip_tag = "tu102" if is_turing else ("ad102" if is_ada else "ga102")
+    specs = ASSET_SPECS_TU if is_turing else (ASSET_SPECS_ADA if is_ada else ASSET_SPECS_GA)
 
     clang_bin = find_llvm_tool("clang")
     lld_bin = find_llvm_tool("lld-link")
@@ -1660,6 +1752,7 @@ def build_and_stage_usb(
 #define GU_VRAM_MIN_MIB 0x{validated['vram_min']:x}U
 #define GU_VRAM_MAX_MIB 0x{validated['vram_max']:x}U
 #define GU_ARCH_ADA {1 if is_ada else 0}
+#define GU_ARCH_TURING {1 if is_turing else 0}
 #define GU_EXPECTED_COLD_PLM 0xffffff8fU
 #define GU_EXPECTED_POST_FLR_PLM 0xffffffffU
 
@@ -1720,8 +1813,8 @@ def build_and_stage_usb(
         efi_sha = sha256_bytes(efi_bytes)
 
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        v67_name = "v67-ad102-610.43.03-four-plm.bin" if is_ada else "v67-ga102-610.43.03.bin"
-        v67_bytes = build_v67_payload(is_ada=is_ada)
+        v67_name = "v67-tu102-610.43.03.bin" if is_turing else ("v67-ad102-610.43.03-four-plm.bin" if is_ada else "v67-ga102-610.43.03.bin")
+        v67_bytes = build_v67_payload(is_ada=is_ada, arch="tu102" if is_turing else None)
         if len(v67_bytes) != specs[v67_name][0] or sha256_bytes(v67_bytes) != specs[v67_name][1]:
             raise ValueError(f"Generated {v67_name} failed SHA-256 verification")
 
@@ -1779,14 +1872,15 @@ def build_and_stage_usb(
             _write_verified_file(assets_dir / fname, blob, exp_sha)
             log_fn(f"[OK] Staged & verified {fname} ({exp_sz} bytes)")
 
-        gsp_dest = assets_dir / "gsp_ga10x.bin"
-        exp_gsp_sz, exp_gsp_sha = specs["gsp_ga10x.bin"]
+        gsp_fname = "gsp_tu10x.bin" if is_turing else "gsp_ga10x.bin"
+        gsp_dest = assets_dir / gsp_fname
+        exp_gsp_sz, exp_gsp_sha = specs[gsp_fname]
         if gsp_dest.exists() and not _is_reparse_or_symlink(gsp_dest) and gsp_dest.stat().st_size == exp_gsp_sz and sha256_file(gsp_dest) == exp_gsp_sha:
-            log_fn("[OK] Reused existing verified gsp_ga10x.bin on target")
+            log_fn(f"[OK] Reused existing verified {gsp_fname} on target")
         else:
-            cached_gsp = CACHE_DIR / "gsp_ga10x.bin"
+            cached_gsp = CACHE_DIR / gsp_fname
             if not (cached_gsp.exists() and cached_gsp.stat().st_size == exp_gsp_sz and sha256_file(cached_gsp) == exp_gsp_sha):
-                shared_gsp = _find_shared_cached_file("gsp_ga10x.bin", exp_gsp_sha, log_fn)
+                shared_gsp = _find_shared_cached_file(gsp_fname, exp_gsp_sha, log_fn)
                 if shared_gsp is not None:
                     shutil.copy2(shared_gsp, cached_gsp)
             if not (cached_gsp.exists() and cached_gsp.stat().st_size == exp_gsp_sz and sha256_file(cached_gsp) == exp_gsp_sha):
@@ -1796,15 +1890,15 @@ def build_and_stage_usb(
                     PACKAGE_SHA256,
                     log_fn,
                 )
-                log_fn("[EXTRACT] Unpacking gsp_ga10x.bin (84.2 MB)...")
-                extract_gsp_from_zst(pkg_path, cached_gsp)
+                log_fn(f"[EXTRACT] Unpacking {gsp_fname} ({exp_gsp_sz / (1024 * 1024):.1f} MB)...")
+                extract_gsp_from_zst(pkg_path, cached_gsp, member_name=gsp_fname)
                 if sha256_file(cached_gsp) != exp_gsp_sha:
                     cached_gsp.unlink(missing_ok=True)
-                    raise ValueError("Extracted gsp_ga10x.bin SHA-256 mismatch!")
+                    raise ValueError(f"Extracted {gsp_fname} SHA-256 mismatch!")
                 _save_to_shared_cache(cached_gsp, exp_gsp_sha)
-            log_fn("[USB] Writing gsp_ga10x.bin (84.2 MB) to target drive (may take 10-30s on FAT32)...")
+            log_fn(f"[USB] Writing {gsp_fname} ({exp_gsp_sz / (1024 * 1024):.1f} MB) to target drive (may take 10-30s on FAT32)...")
             _write_verified_file(gsp_dest, cached_gsp.read_bytes(), exp_gsp_sha)
-            log_fn("[OK] Staged & verified gsp_ga10x.bin (84,277,400 bytes)")
+            log_fn(f"[OK] Staged & verified {gsp_fname} ({exp_gsp_sz:,} bytes)")
 
         # Backup any pre-existing foreign BOOTX64.EFI and verify backup SHA-256 even if backup file already exists!
         journal_path = usb_root / "GPU-UNLOCK" / "INSTALL_JOURNAL.JSON"
@@ -1872,7 +1966,7 @@ def read_latest_usb_report(usb_out: str | Path, expected_profile: dict[str, Any]
     usb_root = Path(cleaned_out)
 
     discovered_runs: list[dict[str, Any]] = []
-    for folder_name in ("GPU-UNLOCK", "RTX4090-UNLOCK"):
+    for folder_name in ("GPU-UNLOCK",):
         parent = usb_root / folder_name
         if not parent.exists() or _is_reparse_or_symlink(parent):
             continue

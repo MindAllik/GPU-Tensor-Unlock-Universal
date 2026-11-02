@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Universal NVIDIA Ada Lovelace (AD10x) & Ampere (GA10x) UEFI Port */
+/* Universal NVIDIA Ada Lovelace (AD10x), Ampere (GA10x) & Turing (TU10x) UEFI Port */
 #pragma once
 #include <Uefi.h>
 #include <Protocol/PciIo.h>
@@ -39,6 +39,9 @@
 #endif
 #ifndef GU_ARCH_ADA
 #define GU_ARCH_ADA 1
+#endif
+#ifndef GU_ARCH_TURING
+#define GU_ARCH_TURING 0
 #endif
 #ifndef GU_EXPECTED_COLD_PLM
 #define GU_EXPECTED_COLD_PLM 0xffffff8fU
@@ -102,7 +105,11 @@ extern GU_PLATFORM Gu;
 static inline BOOLEAN GuValidArchChip(UINT32 Chip) {
   if (Chip == GU_BOARD_CHIP) return TRUE;
 #if GU_ALLOW_ARCH_CHIP_FAMILY
-#if !defined(GU_ARCH_ADA) || GU_ARCH_ADA
+#if defined(GU_ARCH_TURING) && GU_ARCH_TURING
+  UINT32 arch = (Chip >> 20) & 0xfffU;
+  return (Chip & 0xffU) == 0xa1U &&
+         (arch == 0x162U || arch == 0x164U || arch == 0x166U);
+#elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
   UINT32 arch = (Chip >> 20) & 0xfffU;
   return (Chip & 0xffU) == 0xa1U &&
          (arch == 0x192U || arch == 0x193U || arch == 0x194U || arch == 0x196U || arch == 0x197U);

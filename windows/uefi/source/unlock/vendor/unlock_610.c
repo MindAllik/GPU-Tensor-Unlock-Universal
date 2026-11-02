@@ -37,7 +37,15 @@
 #define GU_SS0_UNLOCK 0x88888888u
 #define GU_SS1_UNLOCK 0x8u
 #define BOOTER_MAGIC 0x314c5442u
-#if !defined(GU_ARCH_ADA) || GU_ARCH_ADA
+#if defined(GU_ARCH_TURING) && GU_ARCH_TURING
+#define BOOTER_FILE "gpu-unlock/610.43.03/booter_load_tu102.bin"
+#define V67_FILE "gpu-unlock/610.43.03/v67-tu102-610.43.03.bin"
+#define GSP_FILE "gpu-unlock/610.43.03/gsp_tu10x.bin"
+#define BOOT_FILE "gpu-unlock/610.43.03/gsp_boot_tu102.bin"
+#define BOOT_DESC_FILE "gpu-unlock/610.43.03/gsp_boot_desc_tu102.bin"
+#define GSP_SIG_SECTION ".fwsignature_tu10x"
+#define EXPECTED_BOOT_SIZE 16384u
+#elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
 #define BOOTER_FILE "gpu-unlock/610.43.03/booter_load_ad102.bin"
 #define V67_FILE "gpu-unlock/610.43.03/v67-ad102-610.43.03-four-plm.bin"
 #define GSP_FILE "gpu-unlock/610.43.03/gsp_ga10x.bin"
@@ -590,7 +598,14 @@ static int load_booter(struct unlock_transaction_work *work)
 	    work->booter_fw->size != 72u + image_size + sig_bytes)
 		return GU_RESULT(-EINVAL);
 	/* Only this pinned production BOOT_FROM_HS geometry is implemented. */
-#if !defined(GU_ARCH_ADA) || GU_ARCH_ADA
+#if defined(GU_ARCH_TURING) && GU_ARCH_TURING
+	if (hdr.ucode_id != 3 || hdr.engine_id != 1 || hdr.num_sigs != 1 ||
+	    sig_bytes != GU_BOOTER_SIG_TOTAL || hdr.os_code_off != 0 ||
+	    hdr.os_code_size != 256 || hdr.os_data_off != 34048 ||
+	    hdr.os_data_size != 25088 || hdr.app_code_off != 256 ||
+	    hdr.app_code_size != 33792 || hdr.app_data_off != 256 ||
+	    hdr.app_data_size != 0 || hdr.patch_loc != 34560)
+#elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
 	if (hdr.ucode_id != 3 || hdr.engine_id != 1 || hdr.num_sigs != 2 ||
 	    sig_bytes != GU_BOOTER_SIG_TOTAL || hdr.os_code_off != 0 ||
 	    hdr.os_code_size != 256 || hdr.os_data_off != 32256 ||
@@ -796,7 +811,17 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 	u32 mb, vga, lo, hi, plm;
 	int ret;
 
-	if (read_bar(work, 0x001183a4, &mb) || !mb || mb == ~0u ||
+	if (read_bar(work, 0x001183a4, &mb))
+		return GU_RESULT(-ENODEV);
+	if (!mb || inaccessible(mb)) {
+		u32 cap = 0;
+
+		if (read_bar(work, GU_TU102_LOCAL_MEM_RANGE_OFFSET, &cap) ||
+		    inaccessible(cap))
+			return GU_RESULT(-ENODEV);
+		mb = ((cap >> 4) & 63u) << (cap & 15u);
+	}
+	if (!mb || mb == ~0u ||
 	    read_bar(work, 0x00625f04, &vga) || vga == ~0u ||
 	    read_bar(work, 0x001fa7c8, &plm) || plm == ~0u || !(plm & 1) ||
 	    read_bar(work, 0x001fa82c, &lo) || lo == ~0u ||
@@ -1093,20 +1118,22 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 	ret = gpu_unlock_fwsec_patch_frts(image, &fw, frts);
 	if (ret)
 		goto out;
-	if (!fw.ucode_id ||
-	    read_bar(work, 0x008241c0 + (fw.ucode_id - 1) * 4, &fuse_raw)) {
-		ret = -EIO;
-		goto out;
-	}
-	version = gpu_unlock_fuse_version(fuse_raw);
-	dev_info(&work->pdev->dev, "FWSEC fuse: raw=%#x version=%u\n", fuse_raw, version);
-	{
+	if (fw.sig_count > 0) {
 		u32 sig_at = 0;
 
+		if (!fw.ucode_id ||
+		    read_bar(work, 0x008241c0 + (fw.ucode_id - 1) * 4, &fuse_raw)) {
+			ret = -EIO;
+			goto out;
+		}
+		version = gpu_unlock_fuse_version(fuse_raw);
+		dev_info(&work->pdev->dev, "FWSEC fuse: raw=%#x version=%u\n", fuse_raw, version);
 		ret = gpu_unlock_fwsec_sig_offset(fw.sig_versions, version, 384, &sig_at);
 		if (ret)
 			goto out;
 		memcpy((u8 *)image + fw.data_off + fw.pkc_off, rom + fw.sig_off + sig_at, 384);
+	} else {
+		dev_info(&work->pdev->dev, "FWSEC V2: embedded AES-128 signature (no RSA-3k PKC patch required)\n");
 	}
 	pci_set_master(work->pdev);
 	work->master = true;

@@ -643,7 +643,7 @@ class LinuxUnlockApp(tk.Tk):
         tier = info.get("support_tier", "unsupported")
         if die in core_detector.CHIP_BY_PMC:
             _, is_ada = core_detector.CHIP_BY_PMC[die]
-            arch_str = "Ada Lovelace (4-PLM)" if is_ada else "Ampere GA10x (1-PLM)"
+            arch_str = "Turing TU10x (2-PLM)" if die.startswith("TU10") else ("Ada Lovelace (4-PLM)" if is_ada else "Ampere GA10x (1-PLM)")
             self.lbl_arch_tag.configure(
                 text=f"{arch_str} [{tier}]",
                 fg=FG_GREEN if tier == "hardware_tested" else (FG_CYAN if tier == "experimental_simulated" else FG_AMBER),
@@ -655,7 +655,7 @@ class LinuxUnlockApp(tk.Tk):
         t = I18N_LINUX[self.lang]
         inst = self.hw_info.get("install_state") or {}
         fw_ok = bool(inst.get("firmware_installed"))
-        fw_cnt = inst.get("firmware_count", "0/9")
+        fw_cnt = inst.get("firmware_count", "0/14")
         self.lbl_fw_state.configure(
             text=f"{t['lbl_fw_state']} {'VERIFIED [OK]' if fw_ok else 'NOT STAGED'} ({fw_cnt} files)",
             fg=FG_GREEN if fw_ok else FG_AMBER,
@@ -729,7 +729,7 @@ class LinuxUnlockApp(tk.Tk):
                         )
                         self.log(f"[OK] Module Command: {info.get('linux_modprobe_cmd')}")
                     else:
-                        self.log("[WARN] No supported NVIDIA Ada/Ampere GPU detected on this Linux host.")
+                        self.log("[WARN] No supported NVIDIA Ada/Ampere/Turing GPU detected on this Linux host.")
                 finally:
                     self._set_busy(False)
 

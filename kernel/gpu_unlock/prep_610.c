@@ -15,38 +15,57 @@ int gpu_unlock_booter_validate(enum gpu_unlock_booter_arch arch,
 			       const struct gpu_unlock_booter_hdr *hdr,
 			       u32 image_size, u32 sig_bytes)
 {
-	u32 expected_image, data_off, data_size, app_size, patch_loc;
+	u32 expected_image, expected_sig_bytes, expected_num_sigs;
+	u32 data_off, data_size, app_size, patch_loc;
+	bool ucode_ok;
 
 	if (!hdr)
 		return GU_DIAG(-EINVAL);
 	switch (arch) {
 	case GU_BOOTER_GA10X:
 		expected_image = 60416;
+		expected_sig_bytes = GU_BOOTER_SIG_TOTAL;
+		expected_num_sigs = 2;
 		data_off = 35328;
 		data_size = 25088;
 		app_size = 35072;
 		patch_loc = 35344;
+		ucode_ok = (hdr->ucode_id == 3);
 		break;
 	case GU_BOOTER_AD10X:
 		/* NVIDIA 610.43.03 AD102 archive, also selected on AD103..AD107.
 		 * Validating stock geometry does not validate a V67 payload. */
 		expected_image = 56832;
+		expected_sig_bytes = GU_BOOTER_SIG_TOTAL;
+		expected_num_sigs = 2;
 		data_off = 32256;
 		data_size = 24576;
 		app_size = 32000;
 		patch_loc = 32272;
+		ucode_ok = (hdr->ucode_id == 3);
+		break;
+	case GU_BOOTER_TU10X:
+		/* NVIDIA 610.43.03 TU102 archive, shared across TU102/TU104/TU106. */
+		expected_image = GU_BOOTER_IMAGE_SIZE_TU102;
+		expected_sig_bytes = GU_BOOTER_SIG_TOTAL_TU102;
+		expected_num_sigs = 1;
+		data_off = 34048;
+		data_size = 25088;
+		app_size = 33792;
+		patch_loc = 34560;
+		ucode_ok = (hdr->ucode_id == 3 || hdr->ucode_id == 13);
 		break;
 	default:
 		return GU_DIAG(-EOPNOTSUPP);
 	}
-	if (image_size != expected_image || sig_bytes != GU_BOOTER_SIG_TOTAL ||
-	    hdr->sig_bytes != sig_bytes || hdr->ucode_id != 3 ||
-	    hdr->engine_id != 1 || hdr->num_sigs != 2 || hdr->num_apps != 1 ||
-	    hdr->os_code_off != 0 || hdr->os_code_size != 256 ||
-	    hdr->os_data_off != data_off || hdr->os_data_size != data_size ||
-	    hdr->app_code_off != 256 || hdr->app_code_size != app_size ||
-	    hdr->app_data_off != 256 || hdr->app_data_size != 0 ||
-	    hdr->patch_loc != patch_loc)
+	if (image_size != expected_image || sig_bytes != expected_sig_bytes ||
+	    hdr->sig_bytes != sig_bytes || !ucode_ok ||
+	    hdr->engine_id != 1 || hdr->num_sigs != expected_num_sigs ||
+	    hdr->num_apps != 1 || hdr->os_code_off != 0 ||
+	    hdr->os_code_size != 256 || hdr->os_data_off != data_off ||
+	    hdr->os_data_size != data_size || hdr->app_code_off != 256 ||
+	    hdr->app_code_size != app_size || hdr->app_data_off != 256 ||
+	    hdr->app_data_size != 0 || hdr->patch_loc != patch_loc)
 		return GU_DIAG(-EINVAL);
 	return 0;
 }
@@ -87,6 +106,30 @@ static const struct gpu_unlock_booter_geometry gpu_unlock_boot_fws[] = {
 			.app_data_off = 256, .app_data_size = 0,
 			.patch_loc = 32272, .ucode_id = 3, .engine_id = 1,
 			.num_sigs = 2, .sig_bytes = GU_BOOTER_SIG_TOTAL,
+		},
+	},
+	{	/* TU102 BooterLoadUcode, 610.43.03 (ucode_id = 3) */
+		.image_size = GU_BOOTER_IMAGE_SIZE_TU102,
+		.sig_bytes = GU_BOOTER_SIG_TOTAL_TU102,
+		.hdr = {
+			.os_code_off = 0, .os_code_size = 256,
+			.os_data_off = 34048, .os_data_size = 25088,
+			.num_apps = 1, .app_code_off = 256, .app_code_size = 33792,
+			.app_data_off = 256, .app_data_size = 0,
+			.patch_loc = 34560, .ucode_id = 3, .engine_id = 1,
+			.num_sigs = 1, .sig_bytes = GU_BOOTER_SIG_TOTAL_TU102,
+		},
+	},
+	{	/* TU102 BooterLoadUcode, 610.43.03 (ucode_id = 13) */
+		.image_size = GU_BOOTER_IMAGE_SIZE_TU102,
+		.sig_bytes = GU_BOOTER_SIG_TOTAL_TU102,
+		.hdr = {
+			.os_code_off = 0, .os_code_size = 256,
+			.os_data_off = 34048, .os_data_size = 25088,
+			.num_apps = 1, .app_code_off = 256, .app_code_size = 33792,
+			.app_data_off = 256, .app_data_size = 0,
+			.patch_loc = 34560, .ucode_id = 13, .engine_id = 1,
+			.num_sigs = 1, .sig_bytes = GU_BOOTER_SIG_TOTAL_TU102,
 		},
 	},
 };

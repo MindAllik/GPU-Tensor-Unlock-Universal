@@ -20,7 +20,9 @@ typedef uint64_t u64;
 
 #define GU_BOOTER_IMAGE_SIZE 60416u
 #define GU_BOOTER_IMAGE_SIZE_AD102 56832u
+#define GU_BOOTER_IMAGE_SIZE_TU102 59136u
 #define GU_BOOTER_SIG_TOTAL 768u
+#define GU_BOOTER_SIG_TOTAL_TU102 16u
 
 /* Tested AD102 PCI ID using the pinned AD102-family Booter assets. */
 #define GU_AD102_RTX_4090 0x2684u

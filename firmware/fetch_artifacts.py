@@ -41,7 +41,7 @@ def fetch(entry: dict, output: Path, offline: bool = False) -> Path:
         raise ValueError("artifact downloads require HTTPS")
     temporary = None
     try:
-        request = urllib.request.Request(entry["url"], headers={"User-Agent": "gpu-unlock-artifacts/1.1.0"})
+        request = urllib.request.Request(entry["url"], headers={"User-Agent": "gpu-unlock-artifacts"})
         with urllib.request.urlopen(request, timeout=60) as response:
             if not response.url.startswith("https://"):
                 raise ValueError("refusing non-HTTPS redirect")

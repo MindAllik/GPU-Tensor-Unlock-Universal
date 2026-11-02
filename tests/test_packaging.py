@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Check the generated payload and the shared install layout."""
+"""Check the generated payloads, single-source README.md version, and shared install layout."""
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -15,9 +16,17 @@ sys.path.insert(0, str(ROOT / "firmware"))
 import generate_v67  # noqa: E402
 
 
+def read_readme_version() -> str:
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    m = re.search(r"\*\*Version:\s*([0-9]+\.[0-9]+\.[0-9]+)\*\*", text)
+    if not m:
+        raise AssertionError("Could not find **Version: X.Y.Z** in README.md")
+    return m.group(1)
+
+
 class PackageTests(unittest.TestCase):
     @unittest.skipUnless((ASSETS / "booter_load_ad102.bin").is_file(),
-                         "set GPU_UNLOCK_ASSETS to the pinned GA/Ada asset directory")
+                         "set GPU_UNLOCK_ASSETS to the pinned GA/Ada/Turing asset directory")
     def test_firmware_package_contains_pinned_ada_assets_and_payload(self):
         with tempfile.TemporaryDirectory() as directory:
             subprocess.run(["make", "-s", f"DESTDIR={directory}", f"ASSETS={ASSETS}",
@@ -38,7 +47,8 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(digest, self.manifest()["generated_payload"]["sha256"])
 
     def test_install_uses_standard_paths(self):
-        version = (ROOT / "VERSION").read_text().strip()
+        version = read_readme_version()
+        self.assertFalse((ROOT / "VERSION").exists(), "Standalone VERSION file must not exist; README.md is the single source of truth")
         with tempfile.TemporaryDirectory() as directory:
             subprocess.run(["make", "-s", f"DESTDIR={directory}", "install-dkms",
                             "install-mkinitcpio", "install-initramfs-tools",
@@ -54,10 +64,9 @@ class PackageTests(unittest.TestCase):
                              "usr/lib/dracut/dracut.conf.d/gpu-unlock.conf",
                              "usr/share/doc/gpu-unlock/README.md"):
                 self.assertIn(expected, paths)
+            installed_dkms = (root / f"usr/src/gpu-unlock-{version}/dkms.conf").read_text()
+            self.assertIn(f'PACKAGE_VERSION="{version}"', installed_dkms)
             self.assertFalse(any(path.endswith(".mod.c") for path in paths))
-            # Another package's "softdep nvidia" line would silently win over
-            # ours (kmod honours only the first), so the order comes from the
-            # initramfs instead: gpu_unlock goes right before nvidia.
             self.assertFalse(any("modprobe.d" in path for path in paths))
             dropin = root / "etc/mkinitcpio.conf.d/zz-gpu-unlock.conf"
             for before, after in (("zfs nvidia nvidia_drm", "zfs gpu_unlock nvidia nvidia_drm"),
@@ -74,16 +83,17 @@ class PackageTests(unittest.TestCase):
             artifact = manifest["source_artifacts"][index]
             self.assertIn(artifact["sha256"], pkgbuild)
             self.assertIn(artifact["url"].rsplit("/", 1)[0], pkgbuild)
-        self.assertIn(f"pkgver={(ROOT / 'VERSION').read_text().strip()}\n", pkgbuild)
+        self.assertIn("README.md", pkgbuild)
 
-    def test_native_versions_match(self):
-        version = (ROOT / "VERSION").read_text().strip()
+    def test_native_versions_derive_from_readme(self):
+        version = read_readme_version()
+        self.assertRegex(version, r"^\d+\.\d+\.\d+$")
         spec = (ROOT / "packaging/rpm/gpu-unlock.spec").read_text()
-        self.assertIn(f"Version: {version}\n", spec)
+        self.assertIn("README.md", spec)
         for index in (0, 2):
             self.assertIn(self.manifest()["source_artifacts"][index]["sha256"], spec)
-        changelog = (ROOT / "debian/changelog").read_text()
-        self.assertTrue(changelog.startswith(f"gpu-unlock ({version}) "))
+        rules = (ROOT / "debian/rules").read_text()
+        self.assertIn("README.md", rules)
 
     @staticmethod
     def manifest():

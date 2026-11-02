@@ -205,6 +205,33 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
 
 
 
+    def test_turing_rtx2080ti_classification_and_boot_option(self) -> None:
+        cls = core_detector.classify_pci_device(0x1E07, "NVIDIA GeForce RTX 2080 Ti", "sm_75")
+        self.assertTrue(cls["supported"])
+        self.assertEqual(cls["die_name"], "TU102")
+        self.assertEqual(cls["chip_id"], 0x162000A1)
+        self.assertFalse(cls["is_ada"])
+        self.assertTrue(cls["is_turing"])
+        gpu_sample = {
+            "pci_bdf": "0000:04:00.0",
+            "board_id_hex": "0x1e0710de",
+            "gpu_name": "NVIDIA GeForce RTX 2080 Ti",
+        }
+        self.assertEqual(
+            core_detector.get_linux_boot_option_for_gpu(gpu_sample),
+            "gpu_unlock.targets=0000:04:00.0 gpu_unlock.turing_experimental=1",
+        )
+        self.assertEqual(
+            core_detector.get_linux_modprobe_command_for_gpu(gpu_sample),
+            "modprobe gpu_unlock targets=0000:04:00.0 turing_experimental=1",
+        )
+        v67_tu = core_detector.build_v67_payload(arch="tu102")
+        self.assertEqual(len(v67_tu), 64000)
+        self.assertEqual(
+            core_detector.sha256_bytes(v67_tu),
+            "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024",
+        )
+
     def test_windows_bat_is_pure_ascii_crlf_and_no_case_collisions(self) -> None:
         bat_raw = (ROOT / "Windows_Launch_UI.bat").read_bytes()
         # Must be pure 7-bit ASCII so cmd.exe never miscalculates byte offsets on UTF-8 Cyrillic

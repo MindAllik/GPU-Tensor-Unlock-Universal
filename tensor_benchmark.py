@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 """Live CUDA Driver API PTX JIT Tensor Core Benchmark (Before vs. After Comparison)
-Supports NVIDIA Ada Lovelace (sm_89) and Ampere (sm_86) on Windows 10 / 11."""
+Supports NVIDIA Ada Lovelace (sm_89), Ampere (sm_86), and Turing (sm_75) on Windows 10 / 11 & Linux."""
 
 from __future__ import annotations
 
@@ -220,8 +220,8 @@ def run_tensor_benchmark(
     clock_khz = get_attr(13)      # CU_DEVICE_ATTRIBUTE_CLOCK_RATE
 
     cc_str = f"{cc_major}{cc_minor}"
-    # Explicitly restrict to supported Ampere (sm_86) and Ada Lovelace (sm_89)
-    if cc_str not in ("86", "89"):
+    # Explicitly restrict to supported Turing (sm_75), Ampere (sm_86), and Ada Lovelace (sm_89)
+    if cc_str not in ("75", "86", "89"):
         return {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "gpu_name": gpu_name,
@@ -234,7 +234,7 @@ def run_tensor_benchmark(
             "throttled": None,
             "correctness_verified": False,
             "f16_to_f32_ratio": "N/A",
-            "status_text": f"UNSUPPORTED ARCHITECTURE (sm_{cc_str}; requires sm_86 or sm_89)",
+            "status_text": f"UNSUPPORTED ARCHITECTURE (sm_{cc_str}; requires sm_75, sm_86, or sm_89)",
             "metrics": {},
         }
 
@@ -250,21 +250,56 @@ def run_tensor_benchmark(
         _check_cu(cuda.cuMemAlloc_v2(ctypes.byref(d_out), out_bytes), "cuMemAlloc_v2")
         allocated = True
 
+        is_turing_sm = (cc_str == "75")
+        base_ptx_ver = "7.0" if is_turing_sm else "8.0"
+        f16_f16_inst = (
+            (
+                "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 {%h0, %h1}, {%a0, %a1}, {%b0}, {%h0, %h1};\n    "
+                "mma.sync.aligned.m16n8k8.row.col.f16.f16.f16.f16 {%h2, %h3}, {%a0, %a1}, {%b0}, {%h2, %h3};"
+            )
+            if is_turing_sm
+            else (
+                "mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 {%h0, %h1}, {%a0, %a1, %a2, %a3}, {%b0, %b1}, {%h0, %h1};\n    "
+                "mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 {%h2, %h3}, {%a0, %a1, %a2, %a3}, {%b0, %b1}, {%h2, %h3};"
+            )
+        )
+        f16_f32_inst = (
+            (
+                "mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%f0, %f1, %f2, %f3}, {%a0, %a1}, {%b0}, {%f0, %f1, %f2, %f3};\n    "
+                "mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%f4, %f5, %f6, %f7}, {%a0, %a1}, {%b0}, {%f4, %f5, %f6, %f7};"
+            )
+            if is_turing_sm
+            else (
+                "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%f0, %f1, %f2, %f3}, {%a0, %a1, %a2, %a3}, {%b0, %b1}, {%f0, %f1, %f2, %f3};\n    "
+                "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%f4, %f5, %f6, %f7}, {%a0, %a1, %a2, %a3}, {%b0, %b1}, {%f4, %f5, %f6, %f7};"
+            )
+        )
+        f16_ops = 4096 if is_turing_sm else 8192
+        s8_inst = (
+            (
+                "mma.sync.aligned.m8n8k16.row.col.s32.s8.s8.s32 {%s0, %s1}, {%a0}, {%b0}, {%s0, %s1};\n    "
+                "mma.sync.aligned.m8n8k16.row.col.s32.s8.s8.s32 {%s4, %s5}, {%a0}, {%b0}, {%s4, %s5};"
+            )
+            if is_turing_sm
+            else (
+                "mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 {%s0, %s1, %s2, %s3}, {%a0, %a1, %a2, %a3}, {%b0, %b1}, {%s0, %s1, %s2, %s3};\n    "
+                "mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 {%s4, %s5, %s6, %s7}, {%a0, %a1, %a2, %a3}, {%b0, %b1}, {%s4, %s5, %s6, %s7};"
+            )
+        )
+        s8_ops = 4096 if is_turing_sm else 16384
+
         specs = [
             (
                 "f16_acc_f16",
                 "FP16 -> FP16 accumulate (FMLA16)",
                 "FMLA16",
                 "TFLOP/s",
-                "8.0",
-                (
-                    "mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 {%h0, %h1}, {%a0, %a1, %a2, %a3}, {%b0, %b1}, {%h0, %h1};\n    "
-                    "mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 {%h2, %h3}, {%a0, %a1, %a2, %a3}, {%b0, %b1}, {%h2, %h3};"
-                ),
+                base_ptx_ver,
+                f16_f16_inst,
                 ".reg .b32 %h<4>, %a<4>, %b<2>;",
                 "mov.b32 %h0, 0x3c003c00; mov.b32 %h1, 0x3c003c00; mov.b32 %h2, 0x3c003c00; mov.b32 %h3, 0x3c003c00; mov.b32 %a0, 0x38003800; mov.b32 %a1, 0x38003800; mov.b32 %a2, 0x38003800; mov.b32 %a3, 0x38003800; mov.b32 %b0, 0x38003800; mov.b32 %b1, 0x38003800;",
                 "xor.b32 %r8, %h0, %h1; xor.b32 %r9, %h2, %h3; add.u32 %r10, %r8, %r9; add.u32 %r10, %r10, %r2;",
-                8192,
+                f16_ops,
                 True,
                 False,
             ),
@@ -273,15 +308,12 @@ def run_tensor_benchmark(
                 "FP16 -> FP32 accumulate (FMLA32)",
                 "FMLA32",
                 "TFLOP/s",
-                "8.0",
-                (
-                    "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%f0, %f1, %f2, %f3}, {%a0, %a1, %a2, %a3}, {%b0, %b1}, {%f0, %f1, %f2, %f3};\n    "
-                    "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%f4, %f5, %f6, %f7}, {%a0, %a1, %a2, %a3}, {%b0, %b1}, {%f4, %f5, %f6, %f7};"
-                ),
+                base_ptx_ver,
+                f16_f32_inst,
                 ".reg .f32 %f<8>; .reg .b32 %a<4>, %b<2>;",
                 "mov.f32 %f0, 0f3f800000; mov.f32 %f1, 0f3f800000; mov.f32 %f2, 0f3f800000; mov.f32 %f3, 0f3f800000; mov.f32 %f4, 0f3f800000; mov.f32 %f5, 0f3f800000; mov.f32 %f6, 0f3f800000; mov.f32 %f7, 0f3f800000; mov.b32 %a0, 0x38003800; mov.b32 %a1, 0x38003800; mov.b32 %a2, 0x38003800; mov.b32 %a3, 0x38003800; mov.b32 %b0, 0x38003800; mov.b32 %b1, 0x38003800;",
                 "add.f32 %f0, %f0, %f4; mov.b32 %r10, %f0; add.u32 %r10, %r10, %r2;",
-                8192,
+                f16_ops,
                 True,
                 True,
             ),
@@ -341,15 +373,12 @@ def run_tensor_benchmark(
                 "INT8 -> INT32 accumulate (IMLA1)",
                 "IMLA1",
                 "TOP/s",
-                "8.0",
-                (
-                    "mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 {%s0, %s1, %s2, %s3}, {%a0, %a1, %a2, %a3}, {%b0, %b1}, {%s0, %s1, %s2, %s3};\n    "
-                    "mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 {%s4, %s5, %s6, %s7}, {%a0, %a1, %a2, %a3}, {%b0, %b1}, {%s4, %s5, %s6, %s7};"
-                ),
+                base_ptx_ver,
+                s8_inst,
                 ".reg .s32 %s<8>; .reg .b32 %a<4>, %b<2>;",
                 "mov.s32 %s0, 1; mov.s32 %s1, 1; mov.s32 %s2, 1; mov.s32 %s3, 1; mov.s32 %s4, 1; mov.s32 %s5, 1; mov.s32 %s6, 1; mov.s32 %s7, 1; mov.b32 %a0, 0x01010101; mov.b32 %a1, 0x01010101; mov.b32 %a2, 0x01010101; mov.b32 %a3, 0x01010101; mov.b32 %b0, 0x01010101; mov.b32 %b1, 0x01010101;",
                 "add.s32 %s0, %s0, %s4; mov.b32 %r10, %s0; add.u32 %r10, %r10, %r2;",
-                16384,
+                s8_ops,
                 False,
                 False,
             ),
@@ -358,7 +387,7 @@ def run_tensor_benchmark(
                 "Scalar FP32 FMA (CUDA Cores, FFMA)",
                 "FFMA",
                 "TFLOP/s",
-                "8.0",
+                base_ptx_ver,
                 "fma.rn.f32 %f0, %f0, %f1, %f2; fma.rn.f32 %f3, %f3, %f1, %f2; fma.rn.f32 %f4, %f4, %f1, %f2; fma.rn.f32 %f5, %f5, %f1, %f2;",
                 ".reg .f32 %f<8>;",
                 "mov.f32 %f0, 0f3f800000; mov.f32 %f1, 0f3f800000; mov.f32 %f2, 0f3dcccccd; mov.f32 %f3, 0f3f800000; mov.f32 %f4, 0f3f800000; mov.f32 %f5, 0f3f800000;",
@@ -379,7 +408,7 @@ def run_tensor_benchmark(
         all_verified = True
 
         for key, label, fuse, unit, ptx_ver, inst, regs, init_r, epilogue, ops_per_inst, required, is_float in specs:
-            if key.startswith("fp8_") and cc_str != "89":
+            if (key.startswith("fp8_") and cc_str != "89") or (key in ("bf16_acc_f32", "tf32_acc_f32") and cc_str == "75"):
                 results[key] = {
                     "label": label,
                     "fuse": fuse,

@@ -18,6 +18,7 @@
 #define RTX_4090 0x2684 /* AD102 */
 #define RTX_4070TI_SUPER GU_AD103_RTX_4070_TI_SUPER
 #define RTX_4070TI GU_AD104_RTX_4070_TI
+#define RTX_2080TI 0x1e07
 
 static struct pci_dev devices[MAX_DEVICES];
 static unsigned int device_count;
@@ -204,6 +205,8 @@ static void reset(char *list)
 	targets = list;
 	ad103_experimental = false;
 	ad104_experimental = false;
+	ada_experimental = false;
+	turing_experimental = false;
 }
 
 /* Runs init, then checks what holds for every case. */
@@ -367,6 +370,26 @@ int main(void)
 	run();
 	assert(fake.loads == 1 && fake.started == 1 && fake.unlocks[0]);
 	puts("ad104: gated exact-card dispatch PASS");
+
+	/* The Turing RTX 2080 Ti target needs turing_experimental=1 and one exact BDF. */
+	reset("0000:01:00.0");
+	add("0000:01:00.0", RTX_2080TI, false);
+	run();
+	assert(!fake.loads && !fake.started);
+	assert(logged("no supported card at \"0000:01:00.0\""));
+	reset("all");
+	turing_experimental = true;
+	add("0000:01:00.0", RTX_2080TI, false);
+	run();
+	assert(!fake.loads && !fake.started);
+	assert(logged("experimental Turing target requires a single exact PCI target"));
+	reset("0000:01:00.0");
+	turing_experimental = true;
+	add("0000:01:00.0", RTX_2080TI, false);
+	fake.expected_concurrent = 1;
+	run();
+	assert(fake.loads == 1 && fake.started == 1 && fake.unlocks[0]);
+	puts("turing: gated exact-card dispatch PASS");
 
 	/* No opt-in on the command line: the module does nothing. */
 	for (int empty = 0; empty < 2; empty++) {

@@ -11,18 +11,36 @@ typedef uint16_t u16;
 typedef uint32_t u32;
 #endif
 
+#ifdef GU_UEFI_PORT
+#include "../local_profile.h"
+#endif
+
 /*
- * Offsets and fields from the pinned 610.43.03 GA102 headers:
- * dev_gc6_island.h, dev_gc6_island_addendum.h, dev_gsp.h, dev_falcon_v4.h.
+ * Offsets and fields from the pinned 610.43.03 GA102 and TU102 headers:
+ * dev_gc6_island.h, dev_gc6_island_addendum.h, dev_gsp.h, dev_falcon_v4.h,
+ * dev_fuse.h, dev_graphics_nobundle.h, dev_fb.h.
  * GFW completion uses kflcnWaitForHalt_TU102 (Falcon CPUCTL), not RISC-V CPUCTL.
  */
 #define GU_GFW_PLM_OFFSET 0x00118128u
 #define GU_GFW_BOOT_OFFSET 0x00118234u
 #define GU_GFW_CPUCTL_OFFSET 0x00110100u
 #define GU_GFW_TIMEOUT_US 2050000u
+
+#define GU_TU102_FEAT_PLM_OFFSET 0x00409650u
+#define GU_TU102_FEAT_SS0_OFFSET 0x00409664u
+#define GU_TU102_FEAT_SS1_OFFSET 0x0040966cu
+#define GU_TU102_LOCAL_MEM_RANGE_OFFSET 0x00100ce0u
+
+#if defined(GU_ARCH_TURING) && GU_ARCH_TURING
+#define GU_FEAT_PLM_OFFSET GU_TU102_FEAT_PLM_OFFSET
+#define GU_FEAT_SS0_OFFSET GU_TU102_FEAT_SS0_OFFSET
+#define GU_FEAT_SS1_OFFSET GU_TU102_FEAT_SS1_OFFSET
+#else
 #define GU_FEAT_PLM_OFFSET 0x00823804u
 #define GU_FEAT_SS0_OFFSET 0x0082381cu
 #define GU_FEAT_SS1_OFFSET 0x00823820u
+#endif
+
 #define GU_GFW_PLM_LEVEL0 0x1u
 #define GU_GFW_BOOT_COMPLETED 0xffu
 #define GU_GFW_CPUCTL_HALTED 0x10u

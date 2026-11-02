@@ -14,6 +14,7 @@ from pathlib import Path
 
 MANIFEST = Path(__file__).with_name("artifacts-610.43.03.json")
 ADA_MANIFEST = Path(__file__).with_name("ada-610.43.03.json")
+TURING_MANIFEST = Path(__file__).with_name("turing-610.43.03.json")
 
 
 MAGIC = 0x314C5442
@@ -80,9 +81,10 @@ def build_bundle(source_text: str) -> bytes:
     loc = struct.unpack("<I", patch_loc)[0]
     _fuse, engine, ucode = struct.unpack("<3I", patch_meta)
     count = struct.unpack("<I", num_sigs)[0]
-    if not count or len(signatures) != count * 384 or fields[4] != 1 or not ucode:
+    sig_unit = 16 if (count and len(signatures) == count * 16) else 384
+    if not count or len(signatures) != count * sig_unit or fields[4] != 1 or not ucode:
         raise ValueError('unsupported production Booter signature/application table')
-    if loc < fields[2] or loc + 384 > fields[2] + fields[3] or fields[2] + fields[3] > len(image):
+    if loc < fields[2] or loc + sig_unit > fields[2] + fields[3] or fields[2] + fields[3] > len(image):
         raise ValueError('signature patch is outside DMEM image')
     for offset, size in ((fields[0],fields[1]), (fields[2],fields[3]), (fields[5],fields[6])):
         if offset + size > len(image) or offset % 256 or size % 256:
@@ -104,11 +106,41 @@ ADA_PINNED = {
     'g_bindata_kgspGetBinArchiveBooterLoadUcode_AD102.c': '0504f640bc36d03c3b617b1d80cf6eee1c8022cdfffb52ed22405aaa316a1460',
     'g_bindata_kgspGetBinArchiveGspRmBoot_AD102.c': 'da110719ed6b680f26f3f7158f6731d1ff20fa859857238e23ac4935bd4cd91c',
 }
+TU102_PINNED = (
+    'g_bindata_kgspGetBinArchiveBooterLoadUcode_TU102.c',
+    'g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c',
+)
 
 
 def extract_assets(source_root: Path, output: Path, chip: str = "ga102") -> None:
-    if chip not in ("ga102", "ad102"):
+    if chip not in ("ga102", "ad102", "tu102"):
         raise ValueError("unsupported firmware profile: " + chip)
+    if chip == "tu102":
+        inputs = {}
+        for name in TU102_PINNED:
+            path = source_root / 'src/nvidia/generated' / name
+            if not path.is_file():
+                raise ValueError('missing generated Turing source: ' + name)
+            inputs[name] = path.read_bytes().decode('ascii')
+        booter = build_bundle(inputs['g_bindata_kgspGetBinArchiveBooterLoadUcode_TU102.c'])
+        boot = inputs['g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c']
+        image = _array_bytes(boot, 'UCODE_IMAGE_PROD')[0]
+        desc = _array_bytes(boot, 'UCODE_DESC_PROD')[0]
+        blobs = {
+            'booter_load_tu102.bin': booter,
+            'gsp_boot_tu102.bin': image,
+            'gsp_boot_desc_tu102.bin': desc,
+        }
+        sec2_bl_path = source_root / 'src/nvidia/generated/g_bindata_ksec2GetBinArchiveSec2blUcode_TU102.c'
+        if sec2_bl_path.is_file():
+            sec2_text = sec2_bl_path.read_bytes().decode('ascii')
+            bl_img = _array_bytes(sec2_text, 'UCODE_IMAGE')[0]
+            blobs['bl_gsp_tu102.bin'] = bl_img
+        output.mkdir(parents=True, exist_ok=True)
+        for name, data in blobs.items():
+            (output / name).write_bytes(data)
+        return
+
     source_pins = PINNED if chip == "ga102" else ADA_PINNED
     inputs = {}
     for name, digest in source_pins.items():
@@ -143,8 +175,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help='pinned NVIDIA source root')
     parser.add_argument("output", type=Path)
-    parser.add_argument("--chip", choices=("ga102", "ad102"), default="ga102",
-                        help="ad102 extracts stock research assets only; it does not create an Ada unlock payload")
+    parser.add_argument("--chip", choices=("ga102", "ad102", "tu102"), default="ga102",
+                        help="extracts stock Booter/GSP boot assets for ga102, ad102, or tu102")
     args = parser.parse_args()
     extract_assets(args.source, args.output, args.chip)
     return 0

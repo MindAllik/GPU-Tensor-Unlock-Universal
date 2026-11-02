@@ -15,14 +15,22 @@ typedef uint32_t u32;
 typedef uint64_t u64;
 #endif
 
+#ifdef GU_UEFI_PORT
+#include "../local_profile.h"
+#endif
+
 #include "layout_610.h"
 
-#if !defined(GU_ARCH_ADA) || GU_ARCH_ADA
+#if defined(GU_ARCH_TURING) && GU_ARCH_TURING
+#define GU_BOOTER_IMAGE_SIZE 59136u
+#define GU_BOOTER_SIG_TOTAL 16u
+#elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
 #define GU_BOOTER_IMAGE_SIZE 56832u
+#define GU_BOOTER_SIG_TOTAL 768u
 #else
 #define GU_BOOTER_IMAGE_SIZE 60416u
-#endif
 #define GU_BOOTER_SIG_TOTAL 768u
+#endif
 #define GU_V67_SIZE 0xfa00u
 #define GU_WPR_META_SIZE 256u
 #define GU_WPR_META_MAGIC 0xdc3aae21371a60b3ull

@@ -1,7 +1,8 @@
 Source: gpu-unlock
 Section: kernel
 Priority: optional
-Maintainer: JustAResearcher <62031663+JustAResearcher@users.noreply.github.com>
+Maintainer: MindAllik <MindAllik@users.noreply.github.com>
+Homepage: https://github.com/MindAllik/GPU-Tensor-Unlock-Universal
 Build-Depends: debhelper-compat (= 13), dh-sequence-dkms, python3, zstd
 Standards-Version: 4.7.0
 Rules-Requires-Root: no

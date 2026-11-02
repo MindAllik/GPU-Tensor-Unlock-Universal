@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "target": "TU102 Booter archive shared by TU102/TU104/TU106 (GeForce RTX 20-series / CMP 40HX / CMP 50HX)",
+  "status": "six-slot TU102 V67 payload and CMP50HX/Turing-unlock direct-SS payload verified against Turing Booter geometry",
+  "source_repository": "https://github.com/NVIDIA/open-gpu-kernel-modules",
+  "source_revision": "452cec62d827034798072827d3866d1881662b77",
+  "source_license": "GPL-2.0 OR MIT; preserve NVIDIA notices",
+  "derived_assets": {
+    "booter_ucode_prod.bin": "e0f0fc93da097b5b68e5af3adb58b2235ed1fad5fce0b23592d3895af44cb743",
+    "bl_gsp_tu102.bin": "f21f1cfbb8fffa8067685314367fc4c50f3f84dd99eda7c19db4292d9269b9d9",
+    "gsp_rm_boot_dbg.bin": "fa43239bcee7b97ca62f007cc68487560a39e19f74f3dde7486db3f98df8e471"
+  },
+  "booter_geometry": {
+    "image_size": 59136,
+    "os_code_offset": 0,
+    "os_code_size": 256,
+    "os_data_offset": 34048,
+    "os_data_size": 25088,
+    "application_count": 1,
+    "app_code_offset": 256,
+    "app_code_size": 33792,
+    "app_data_offset": 256,
+    "app_data_size": 0,
+    "signature_patch_offset": 34560,
+    "ucode_id": 3,
+    "engine_id": 1,
+    "signature_count": 1,
+    "signature_total_bytes": 16
+  },
+  "registers": {
+    "feat_ovr_plm": "0x00409650",
+    "feat_ss0": "0x00409664",
+    "feat_ss1": "0x0040966c",
+    "feat_readout_0": "0x00409660",
+    "feat_readout_1": "0x00409668",
+    "local_memory_range": "0x00100ce0"
+  },
+  "payload": {
+    "filename": "v67-tu102-610.43.03.bin",
+    "sha256": "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024",
+    "direct_ss_sha256": "de7288bcfb80c2d4b259a59e823c926ba0a9adcab594219cc6802c94257ce271",
+    "source": "Zagitta/gpu-unlock kernel/gpu_unlock/recipes.c (tu102_v67) and xrip/cmp50hx-unlock",
+    "external_hardware_evidence": [
+      "CMP 50HX TU102 10de:1e09 (xrip/cmp50hx-unlock)",
+      "GeForce RTX 2080 Ti TU102 10de:1e04 / 10de:1e07 (haohervchb/Turing-unlock, nlzy/turing-unlock, KohakuBlueleaf/KohakUnlock)",
+      "GeForce RTX 2070 TU106 10de:1f07 & RTX 2060 SUPER 10de:1f06 (physicsdolphin/nv-uefi-unlocker)"
+    ]
+  }
+}

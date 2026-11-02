@@ -12,7 +12,7 @@ typedef uint32_t u32;
 #endif
 
 /*
- * Offsets and fields from the pinned 610.43.03 GA102 headers:
+ * Offsets and fields from the pinned 610.43.03 GA102/TU102 headers:
  * dev_gc6_island.h, dev_gc6_island_addendum.h, dev_gsp.h, dev_falcon_v4.h.
  * GFW completion uses kflcnWaitForHalt_TU102 (Falcon CPUCTL), not RISC-V CPUCTL.
  */
@@ -25,6 +25,13 @@ typedef uint32_t u32;
 #define GU_FEAT_SS1_OFFSET 0x00823820u
 /* Nine 3-bit per-unit SM speed-select values, 0 = full rate (register report). */
 #define GU_FEAT_READOUT_1_OFFSET 0x00823818u
+/* Turing (TU102/TU104/TU106) FECS feature-override and memory range offsets. */
+#define GU_TU102_FEAT_PLM_OFFSET 0x00409650u
+#define GU_TU102_FEAT_READOUT_0_OFFSET 0x00409660u
+#define GU_TU102_FEAT_SS0_OFFSET 0x00409664u
+#define GU_TU102_FEAT_READOUT_1_OFFSET 0x00409668u
+#define GU_TU102_FEAT_SS1_OFFSET 0x0040966cu
+#define GU_TU102_LOCAL_MEM_RANGE_OFFSET 0x00100ce0u
 #define GU_GFW_PLM_LEVEL0 0x1u
 #define GU_GFW_BOOT_COMPLETED 0xffu
 #define GU_GFW_CPUCTL_HALTED 0x10u

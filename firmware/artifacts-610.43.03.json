@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "target": "GA102 reference and RTX 4090 AD102 four-PLM speed-select unlock, NVIDIA firmware 610.43.03",
+  "target": "TU102, GA102, and AD102 speed-select unlock, NVIDIA firmware 610.43.03",
   "source_artifacts": [
     {
       "name": "NVIDIA open kernel modules source archive",
@@ -162,7 +162,10 @@
     "gsp_boot_desc_ga102.bin": "cc5a3fc1f4c47f2fe107b1b68f0176d8a448e6dec84b575e5560ccef5262bf15",
     "booter_load_ad102.bin": "6ee05b20e1dc244c08c052f36ef28469b8d09f4955d1fe33e48a179e11a7fd49",
     "gsp_boot_ad102.bin": "45d6335a8185d6ff13e8d1484cea73f68d3d13aa1c19dc080ed1c3482dd5bac0",
-    "gsp_boot_desc_ad102.bin": "83f8f3f1f5f9496e0ea8fc7103c2beb64d0b6de2f5ffe725f13514de5a95fa42"
+    "gsp_boot_desc_ad102.bin": "83f8f3f1f5f9496e0ea8fc7103c2beb64d0b6de2f5ffe725f13514de5a95fa42",
+    "booter_load_tu102.bin": "a5cd2eb6a92f343003eb3da67905318dc24f59f77dc02fb48b6389098fbffdb5",
+    "gsp_boot_tu102.bin": "b2bdccbb79ad4dd48d85c35b00d9ccdf34625bd323805be3f9045a4a24d09fa5",
+    "gsp_boot_desc_tu102.bin": "d66ab92e021b08d58045569df6956ef1bc742c57e7b31736b172578df87eb0e8"
   },
   "limitation": "Hashes pin the build inputs and deterministic payloads. The RTX 4090 report separately records the measured hardware result; success on other Ada models and other firmware revisions is not established.",
   "ada102": {
@@ -193,7 +196,7 @@
       "note": "code_offset/data_offset/manifest_offset are descriptor words 12/10/8, the fields gpu_unlock_boot_desc_parse() returns"
     },
     "v67": "v67-ad102-610.43.03-four-plm.bin",
-    "limitation": "Runtime execution, register acceptance, FLR and stock-driver persistence were measured on one RTX 4090 with NVIDIA 615.78.08 and one RTX 4070 Ti SUPER 10de:2705 with NVIDIA 580.178.04; see rtx4090-register-report.md and docs/ada-2705-report.md. Independent cold-boot reproduction and other board/driver combinations remain unverified."
+    "limitation": "Runtime execution, register acceptance, FLR and stock-driver persistence were measured on one RTX 4090 with NVIDIA 615.78.08 and one RTX 4070 Ti SUPER 10de:2705 with NVIDIA 580.178.04; see docs/rtx4090-register-report.md and docs/ada-2705-report.md. Independent cold-boot reproduction and other board/driver combinations remain unverified."
   },
   "generated_ad102_payload": {
     "name": "AD102 610.43.03 four-PLM V67 signature image",
@@ -370,5 +373,167 @@
       "adaptation": "Deterministic payload constants only; upstream interpreter, narrative and disassembly are not copied."
     },
     "limitation": "The chain is derived from public debug-booter analysis. Payload-byte reproduction alone does not establish hardware behavior; the RTX 4090 report records one measured production-booter success. A mailbox marker alone does not prove BAR writes were accepted."
+  },
+  "tu102": {
+    "meaning": "Pinned TU102 boot assets and geometry used by the Turing (RTX 20-series / CMP 40HX / CMP 50HX) path.",
+    "booter_geometry": {
+      "image_size": 59136,
+      "os_code_off": 0,
+      "os_code_size": 256,
+      "os_data_off": 34048,
+      "os_data_size": 25088,
+      "num_apps": 1,
+      "app_code_off": 256,
+      "app_code_size": 33792,
+      "app_data_off": 256,
+      "app_data_size": 0,
+      "patch_loc": 34560,
+      "ucode_id": 3,
+      "engine_id": 1,
+      "num_sigs": 1,
+      "sig_bytes": 16
+    },
+    "v67": "v67-tu102-610.43.03.bin"
+  },
+  "generated_tu102_payload": {
+    "name": "TU102 610.43.03 six-slot PLM V67 signature image",
+    "filename": "v67-tu102-610.43.03.bin",
+    "size": 64000,
+    "size_hex": "0x0000fa00",
+    "fill_dword_le": "0x000004a7",
+    "dmem_base": "0x00000600",
+    "overrides": [
+      {
+        "offset": "0x00001100",
+        "value": "0x00000007"
+      },
+      {
+        "offset": "0x0000f938",
+        "value": "0x00006140"
+      },
+      {
+        "offset": "0x0000f940",
+        "value": "0x001fa7cc"
+      },
+      {
+        "offset": "0x0000f944",
+        "value": "0xfffff0ff"
+      },
+      {
+        "offset": "0x0000f94c",
+        "value": "0x000010b9"
+      },
+      {
+        "offset": "0x0000f950",
+        "value": "0x00006140"
+      },
+      {
+        "offset": "0x0000f958",
+        "value": "0x00409650"
+      },
+      {
+        "offset": "0x0000f95c",
+        "value": "0xffffffff"
+      },
+      {
+        "offset": "0x0000f964",
+        "value": "0x000010b9"
+      },
+      {
+        "offset": "0x0000f968",
+        "value": "0x00006140"
+      },
+      {
+        "offset": "0x0000f970",
+        "value": "0x00409650"
+      },
+      {
+        "offset": "0x0000f974",
+        "value": "0xffffffff"
+      },
+      {
+        "offset": "0x0000f97c",
+        "value": "0x000010b9"
+      },
+      {
+        "offset": "0x0000f980",
+        "value": "0x00006140"
+      },
+      {
+        "offset": "0x0000f988",
+        "value": "0x00409650"
+      },
+      {
+        "offset": "0x0000f98c",
+        "value": "0xffffffff"
+      },
+      {
+        "offset": "0x0000f994",
+        "value": "0x000010b9"
+      },
+      {
+        "offset": "0x0000f998",
+        "value": "0x00006140"
+      },
+      {
+        "offset": "0x0000f9a0",
+        "value": "0x00409650"
+      },
+      {
+        "offset": "0x0000f9a4",
+        "value": "0xffffffff"
+      },
+      {
+        "offset": "0x0000f9ac",
+        "value": "0x000010b9"
+      },
+      {
+        "offset": "0x0000f9b0",
+        "value": "0x00006140"
+      },
+      {
+        "offset": "0x0000f9b8",
+        "value": "0x00409650"
+      },
+      {
+        "offset": "0x0000f9bc",
+        "value": "0xffffffff"
+      },
+      {
+        "offset": "0x0000f9c4",
+        "value": "0x000010b9"
+      },
+      {
+        "offset": "0x0000f9c8",
+        "value": "0x00006140"
+      },
+      {
+        "offset": "0x0000f9d4",
+        "value": "0x00000003"
+      },
+      {
+        "offset": "0x0000f9dc",
+        "value": "0x00006521"
+      },
+      {
+        "offset": "0x0000f9e0",
+        "value": "0x00007f27"
+      },
+      {
+        "offset": "0x0000f9ec",
+        "value": "0x00000ccb"
+      },
+      {
+        "offset": "0x0000f9f0",
+        "value": "0x00007ea4"
+      }
+    ],
+    "sha256": "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024",
+    "generator": "firmware/generate_v67.py:build_tu102_payload",
+    "provenance": {
+      "name": "Zagitta/gpu-unlock & xrip/cmp50hx-unlock",
+      "url": "https://github.com/Zagitta/gpu-unlock",
+      "license": "GPL-2.0-only"
+    }
   }
 }

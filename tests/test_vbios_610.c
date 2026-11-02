@@ -120,6 +120,24 @@ int main(int argc, char **argv)
 		}
 		free(image);
 	}
+	/* Verify V2 FWSEC descriptor (Turing TU102: 60 bytes, header 0x003c0201). */
+	{
+		u8 v2rom[4096] = {0};
+		struct gpu_unlock_fwsec v2fw;
+		vbios_fixture(v2rom, 6);
+		w32(v2rom + 256, 0x003c0201); /* ver=2, size=60 */
+		w32(v2rom + 260, 1280);       /* stored_size */
+		w32(v2rom + 264, 512);        /* data_off (imem_size) */
+		w32(v2rom + 272, 0);          /* imem_pa */
+		w32(v2rom + 276, 512);        /* imem_size */
+		w32(v2rom + 280, 0);          /* imem_va */
+		w32(v2rom + 284, 0);          /* dmem_pa */
+		w32(v2rom + 288, 768);        /* dmem_size */
+		w32(v2rom + 296, 16);         /* interface_off */
+		assert(!gpu_unlock_vbios_fwsec(v2rom, sizeof(v2rom), &v2fw));
+		assert(v2fw.image_off == 256 + 60 && v2fw.image_size == 1280);
+		assert(v2fw.sig_count == 0 && v2fw.engine_mask == 0x400 && v2fw.ucode_id == 9);
+	}
 	puts("vbios valid-chain, malformed range, patch and signature checks passed");
 	return 0;
 }

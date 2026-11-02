@@ -10,19 +10,23 @@
 
 static char *targets;
 module_param(targets, charp, 0444);
-MODULE_PARM_DESC(targets, "\"all\" or comma-separated PCI addresses of supported RTX 4090/GA10x cards; AD103/AD104 require an exact single address");
+MODULE_PARM_DESC(targets, "\"all\" or comma-separated PCI addresses of supported RTX 4090/GA10x cards; AD103/AD104/Ada/Turing require an exact single address");
 
 static bool ad103_experimental;
 module_param(ad103_experimental, bool, 0444);
-MODULE_PARM_DESC(ad103_experimental, "permit only the exact 10de:2705 AD103 canary with a single explicit PCI address");
+MODULE_PARM_DESC(ad103_experimental, "permit only the exact AD103 target with a single explicit PCI address");
 
 static bool ad104_experimental;
 module_param(ad104_experimental, bool, 0444);
-MODULE_PARM_DESC(ad104_experimental, "permit only the exact 10de:2782 AD104 RTX 4070 Ti target with a single explicit PCI address");
+MODULE_PARM_DESC(ad104_experimental, "permit only the exact AD104 target with a single explicit PCI address");
 
 static bool ada_experimental;
 module_param(ada_experimental, bool, 0444);
 MODULE_PARM_DESC(ada_experimental, "permit experimental desktop AD102/AD106/AD107 targets with a single explicit PCI address");
+
+static bool turing_experimental;
+module_param(turing_experimental, bool, 0444);
+MODULE_PARM_DESC(turing_experimental, "permit experimental desktop TU102/TU104/TU106 RTX 20-series targets with a single explicit PCI address");
 
 /* RTX 4090 and supported desktop GA102/GA103/GA104/GA106 GPU functions.
  * Professional parts already have full FP32-accumulate tensor issue rate.
@@ -59,6 +63,8 @@ static bool supported(const struct pci_dev *pdev)
 		return ad104_experimental;
 	if (gu_is_other_ada_exp_id(pdev->device))
 		return ada_experimental;
+	if (gu_is_turing_exp_id(pdev->device))
+		return turing_experimental;
 	for (i = 0; i < ARRAY_SIZE(supported_ids); i++)
 		if (pdev->device == supported_ids[i])
 			return true;
@@ -153,6 +159,11 @@ static int __init gpu_unlock_init(void)
 			pci_err(pdev, "gpu_unlock: experimental Ada target requires a single exact PCI target\n");
 			continue;
 		}
+		if (gu_is_turing_exp_id(pdev->device) &&
+		    (all || strcasecmp(targets, pci_name(pdev)))) {
+			pci_err(pdev, "gpu_unlock: experimental Turing target requires a single exact PCI target\n");
+			continue;
+		}
 		if (!all && !listed(pci_name(pdev)))
 			continue;
 		if (!shared.gsp) {
@@ -178,5 +189,4 @@ static void __exit gpu_unlock_exit(void)
 module_init(gpu_unlock_init);
 module_exit(gpu_unlock_exit);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("RTX 4090, experimental RTX 4070 Ti SUPER / RTX 4070 Ti and supported GA10x pre-driver tensor unlock");
-MODULE_VERSION("1.1.2");
+MODULE_DESCRIPTION("RTX 4090, experimental RTX 40/20-series and supported GA10x pre-driver tensor unlock");

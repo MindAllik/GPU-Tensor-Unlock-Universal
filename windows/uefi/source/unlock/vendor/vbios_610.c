@@ -112,16 +112,17 @@ static int descriptor(const u8 *rom, size_t length, u64 off,
 		      struct gpu_unlock_fwsec *out)
 {
 	struct gpu_unlock_fwsec fw = { 0 };
-	u32 hdr, size, stored, bits, count = 0;
+	u32 hdr, ver, size, stored, bits, count = 0;
 
 	if (range(length, off, 44))
 		return GU_DIAG(-EINVAL);
 	hdr = r32(rom + off);
+	ver = (hdr >> 8) & 0xff;
 	size = hdr >> 16;
 	GU_NOTE("FWSEC descriptor: offset=%#llx ROM_bytes=%zu header=%#x\n",
 		(unsigned long long)off, length, hdr);
 	/* vDesc: bit 0 set, version in bits 15:8, size in bits 31:16. */
-	if (!(hdr & 1) || ((hdr >> 8) & 0xff) != 3 || size < 44)
+	if (!(hdr & 1) || (ver != 2 && ver != 3) || size < 44)
 		return GU_DIAG(-EOPNOTSUPP);
 	if (range(length, off, size))
 		return GU_DIAG(-EINVAL);
@@ -132,34 +133,53 @@ static int descriptor(const u8 *rom, size_t length, u64 off,
 	if (range(length, off + size, fw.image_size))
 		return GU_DIAG(-EINVAL);
 	fw.image_off = off + size;
-	fw.pkc_off = r32(rom + off + 8);
-	fw.interface_off = r32(rom + off + 12);
-	fw.imem_pa = r32(rom + off + 16);
-	fw.imem_size = r32(rom + off + 20);
-	fw.imem_va = r32(rom + off + 24);
-	fw.dmem_pa = r32(rom + off + 28);
-	fw.dmem_size = r32(rom + off + 32);
-	fw.data_off = fw.imem_size;
-	fw.engine_mask = r16(rom + off + 36);
-	fw.ucode_id = rom[off + 38];
-	fw.sig_count = rom[off + 39];
-	fw.sig_versions = r16(rom + off + 40);
-	fw.sig_off = off + 44;
-	fw.sig_bytes = size - 44;
+	if (ver == 3) {
+		fw.pkc_off = r32(rom + off + 8);
+		fw.interface_off = r32(rom + off + 12);
+		fw.imem_pa = r32(rom + off + 16);
+		fw.imem_size = r32(rom + off + 20);
+		fw.imem_va = r32(rom + off + 24);
+		fw.dmem_pa = r32(rom + off + 28);
+		fw.dmem_size = r32(rom + off + 32);
+		fw.data_off = fw.imem_size;
+		fw.engine_mask = r16(rom + off + 36);
+		fw.ucode_id = rom[off + 38];
+		fw.sig_count = rom[off + 39];
+		fw.sig_versions = r16(rom + off + 40);
+		fw.sig_off = off + 44;
+		fw.sig_bytes = size - 44;
+	} else {
+		/* NV_BIT_FALCON_UCODE_DESC_V2: 60 bytes, embedded AES-128 signature */
+		if (size != 60)
+			return GU_DIAG(-EOPNOTSUPP);
+		fw.data_off = r32(rom + off + 8);
+		fw.imem_pa = r32(rom + off + 16);
+		fw.imem_size = r32(rom + off + 20);
+		fw.imem_va = r32(rom + off + 24);
+		fw.dmem_pa = r32(rom + off + 28);
+		fw.dmem_size = r32(rom + off + 32);
+		fw.interface_off = r32(rom + off + 40);
+		fw.engine_mask = 0x400;
+		fw.ucode_id = 9;
+	}
 	GU_NOTE("FWSEC geometry: image_off=%#x size=%#x imem=%#x va=%#x pa=%#x dmem=%#x pa=%#x pkc=%#x interface=%#x engine=%#x ucode=%u signatures=%u versions=%#x bytes=%u\n",
 		fw.image_off, fw.image_size, fw.imem_size, fw.imem_va, fw.imem_pa,
 		fw.dmem_size, fw.dmem_pa, fw.pkc_off, fw.interface_off, fw.engine_mask,
 		fw.ucode_id, fw.sig_count, fw.sig_versions, fw.sig_bytes);
-	bits = fw.sig_versions;
-	while (bits) {
-		count += bits & 1;
-		bits >>= 1;
+	if (ver == 3) {
+		bits = fw.sig_versions;
+		while (bits) {
+			count += bits & 1;
+			bits >>= 1;
+		}
+		if (!fw.ucode_id || fw.ucode_id > 16 || !fw.engine_mask || !count ||
+		    count != fw.sig_count || fw.sig_bytes != count * 384 ||
+		    range(fw.dmem_size, fw.pkc_off, 384))
+			return GU_DIAG(-EINVAL);
 	}
-	if (!fw.ucode_id || fw.ucode_id > 16 || !fw.engine_mask || !count ||
-	    count != fw.sig_count || fw.sig_bytes != count * 384 ||
-	    !fw.imem_size || !fw.dmem_size ||
+	if (!fw.imem_size || !fw.dmem_size ||
+	    range(fw.image_size, 0, fw.imem_size) ||
 	    range(fw.image_size, fw.data_off, fw.dmem_size) ||
-	    range(fw.dmem_size, fw.pkc_off, 384) ||
 	    range(fw.dmem_size, fw.interface_off, 4))
 		return GU_DIAG(-EINVAL);
 	*out = fw;

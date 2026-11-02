@@ -276,6 +276,11 @@ static EFI_STATUS ColdCheck(VOID) {
   GuLog("cold diagnostic: reg=0x823b00 name=SOURCE_ENABLE_CANDIDATE_RAW value=%#x decoded=0\n",source_raw);
   GuLog("cold diagnostic: reg=0x8403c4 name=RESET_PLM_CANDIDATE_RAW value=%#x decoded=0\n",reset_plm);
   UINT32 vram=GuRead32(0x1183a4);
+  if((!vram || GuInaccessible32(vram)) && !Gu.fault) {
+    UINT32 cap=GuRead32(GU_TU102_LOCAL_MEM_RANGE_OFFSET);
+    if(!Gu.fault && !GuInaccessible32(cap))
+      vram=((cap>>4)&63U)<<(cap&15U);
+  }
   GU_COLD_STATE cold_class=GuClassifyColdState(plm,ss0,ss1,hi);
   GuLog("VRAM register=%#x (%u MiB); accepted=[%#x..%#x] MiB; cold_class=%u; layout uses actual register\n",
     vram,vram,(unsigned)GU_VRAM_MIN_MIB,(unsigned)GU_VRAM_MAX_MIB,(unsigned)cold_class);
@@ -317,12 +322,17 @@ static EFI_STATUS PromCheck(VOID) {
     if(!fw_ret && fw.engine_mask==0x400 && fw.ucode_id==9 &&
        !gpu_unlock_fwsec_dmem_transfer(&fw,&dmem_transfer) &&
        fw.image_size>0 && fw.image_off+fw.image_size<=parse_limit) {
-      UINT32 fuse_raw=GuRead32(0x008241c0U+(fw.ucode_id-1U)*4U);
-      UINT32 fuse_ver=gpu_unlock_fuse_version(fuse_raw),sig_at=0;
-      BOOLEAN sig_ok=!Gu.fault &&
-                     !gpu_unlock_fwsec_sig_offset(fw.sig_versions,fuse_ver,384U,&sig_at) &&
-                     sig_at+384U<=fw.sig_bytes &&
-                     fw.sig_off+sig_at+384U<=parse_limit;
+      BOOLEAN sig_ok=FALSE;
+      if(fw.sig_count>0) {
+        UINT32 fuse_raw=GuRead32(0x008241c0U+(fw.ucode_id-1U)*4U);
+        UINT32 fuse_ver=gpu_unlock_fuse_version(fuse_raw),sig_at=0;
+        sig_ok=!Gu.fault &&
+               !gpu_unlock_fwsec_sig_offset(fw.sig_versions,fuse_ver,384U,&sig_at) &&
+               sig_at+384U<=fw.sig_bytes &&
+               fw.sig_off+sig_at+384U<=parse_limit;
+      } else {
+        sig_ok=!Gu.fault;
+      }
       BOOLEAN patch_ok=FALSE;
       if(sig_ok) {
         VOID *scratch=GuAlloc(fw.image_size);
@@ -362,26 +372,48 @@ static EFI_STATUS PromCheck(VOID) {
 static EFI_STATUS Arm(VOID) {
   if(!Table->ConIn || !Table->ConIn->Reset || !Table->ConIn->ReadKeyStroke)return EFI_UNSUPPORTED;
   EFI_STATUS status=Table->ConIn->Reset(Table->ConIn,FALSE);if(EFI_ERROR(status))return status;
-  GuLogText("READY: NVIDIA GPU TENSOR UNLOCK / UEFI PRE-BOOT / Windows preloaded.\n");
+  GuConsole("\n========================================================================\n");
+  GuLogText("[STAGE 2/3] READY: NVIDIA GPU TENSOR UNLOCK / UEFI PRE-BOOT / Windows preloaded.\n");
   if(PendingOwner.agent)GuLogText("U will release the RTX firmware driver, restore verified access settings if needed, then attempt WPR_CFG -> FBPA -> WPR -> FEAT in ONE SEC2 launch, then SS0/SS1 if required gates pass; log mismatches and recover.\n");
 #if KOH_UNATTENDED_AUTOFIRE
   GuLogText("Press U once to start now. Auto-attempt after 30s unless you press Esc to skip today. One SEC2 fire, then selectors/FLR/Windows on full success. The last frame may remain visible. Power OFF on STOP.\n");
 #else
   GuLogText("Press U once within 30s to start now (or press Esc / wait 30s to cancel safely without hardware changes). One SEC2 fire, then selectors/FLR/Windows on full success. Power OFF on STOP.\n");
 #endif
+  GuConsole("========================================================================\n");
   if(!GuLogReady())return EFI_DEVICE_ERROR;
-  for(UINTN i=0;i<KOH_AUTOCONFIRM_MS/100;i++) {
+  UINTN total_ticks=KOH_AUTOCONFIRM_MS/100;
+  for(UINTN i=0;i<total_ticks;i++) {
+    if((i%10)==0) {
+      UINTN rem_sec=(total_ticks-i)/10;
+      char timer_line[]=">>> WAITING FOR KEY: Press [U] to start unlock or [Esc] to cancel [ 00s ]   \r";
+      timer_line[68]=(char)('0'+(rem_sec/10)%10);
+      timer_line[69]=(char)('0'+(rem_sec%10));
+      GuConsole(timer_line);
+    }
     EFI_INPUT_KEY key;status=Table->ConIn->ReadKeyStroke(Table->ConIn,&key);
     if(!EFI_ERROR(status)) {
-      if(key.ScanCode==0x17 || key.UnicodeChar==27)return EFI_ABORTED;
-      if(key.UnicodeChar=='u' || key.UnicodeChar=='U')return EFI_SUCCESS;
+      if(key.ScanCode==0x17 || key.UnicodeChar==27) {
+        GuConsole("\n>>> [ESC PRESSED] Cancelled safely by user without hardware changes.\n");
+        return EFI_ABORTED;
+      }
+      if(key.UnicodeChar=='u' || key.UnicodeChar=='U') {
+        GuConsole("\n========================================================================\n");
+        GuConsole(">>> [KEY 'U' ACCEPTED] STARTING HARDWARE UNLOCK & PCIe FLR (2-5s)...\n");
+        GuConsole("[STAGE 3/3] Screen will freeze briefly while UEFI display driver disconnects.\n");
+        GuConsole("            Do NOT press keys or power off — Windows boots automatically!\n");
+        GuConsole("========================================================================\n");
+        return EFI_SUCCESS;
+      }
     } else if(status!=EFI_NOT_READY)return status;
     GuStall(100000);
   }
 #if KOH_UNATTENDED_AUTOFIRE
+  GuConsole("\n");
   GuLogText("No key pressed: unattended auto-attempt starting now (confirmation=unattended).\n");
   return EFI_SUCCESS;
 #else
+  GuConsole("\n");
   GuLogText("No key pressed within confirmation window: safe timeout abort without hardware changes (confirmation=manual).\n");
   return EFI_TIMEOUT;
 #endif

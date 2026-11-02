@@ -245,4 +245,3 @@ module_init(gpu_peek_init);
 module_exit(gpu_peek_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Read-only sampler for the gpu_unlock probe registers");
-MODULE_VERSION("0.1.0");

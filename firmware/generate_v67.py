@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Extract pinned 610.43.03 GA10x firmware and generate GA102/AD102 V67 images."""
+"""Extract pinned 610.43.03 GA10x/TU10x firmware and generate GA102/AD102/TU102 V67 images."""
 
 from __future__ import annotations
 
@@ -17,12 +17,15 @@ GSP_SHA256 = "572373620a37418f24dc16b5031c39338778c3257e48e8408de9a57291b24f3a"
 PAYLOAD_SHA256 = "2a0aa1f86d0b6afff5214d641d87d46dc98ef06ed908ff05d0ddbad5ffb7e197"
 AD102_PAYLOAD_SHA256 = "44c36b2d6b3424e53e18f3e55db85c833655de071ce66ce42749588a4a7dc8cb"
 AD102_PAYLOAD_NAME = "v67-ad102-610.43.03-four-plm.bin"
+TU102_PAYLOAD_SHA256 = "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024"
+TU102_PAYLOAD_NAME = "v67-tu102-610.43.03.bin"
 PACKAGE_VERSION = "610.43.03-1"
 FIRMWARE_PREFIX = "usr/lib/firmware/nvidia/610.43.03/"
 MANIFEST = Path(__file__).with_name("artifacts-610.43.03.json")
 
 PAYLOAD_SIZE = 0xFA00
 FILL_DWORD = 0x0000019C
+TU102_FILL_DWORD = 0x000004A7
 PATCHED_WORDS = {
     0x1100: 0x00000007,
     0xF948: 0xFFFFFFFF,
@@ -79,6 +82,46 @@ AD102_PATCHED_WORDS = {
     0xF9FC: 0x0000771E,
 }
 
+# Adapted from Zagitta/gpu-unlock, kernel/gpu_unlock/recipes.c (tu102_v67),
+# GPL-2.0-only, building on nlzy/turing-unlock and xrip/cmp50hx-unlock.
+# Six-write TU102 Booter frame layout with write entry 0x10b9, canary pointer
+# 0x6140, SE/CSB handshake 0x6521, cleanup gadget 0x7f27 -> 0x0ccb, and
+# clean exit 0x7ea4, opening WPR_CFG_PLM (0x001fa7cc -> 0xfffff0ff) and
+# Turing FEAT_OVR_PLM (0x00409650 -> 0xffffffff).
+TU102_PATCHED_WORDS = {
+    0x1100: 0x00000007,
+    0xF938: 0x00006140,
+    0xF940: 0x001FA7CC,
+    0xF944: 0xFFFFF0FF,
+    0xF94C: 0x000010B9,
+    0xF950: 0x00006140,
+    0xF958: 0x00409650,
+    0xF95C: 0xFFFFFFFF,
+    0xF964: 0x000010B9,
+    0xF968: 0x00006140,
+    0xF970: 0x00409650,
+    0xF974: 0xFFFFFFFF,
+    0xF97C: 0x000010B9,
+    0xF980: 0x00006140,
+    0xF988: 0x00409650,
+    0xF98C: 0xFFFFFFFF,
+    0xF994: 0x000010B9,
+    0xF998: 0x00006140,
+    0xF9A0: 0x00409650,
+    0xF9A4: 0xFFFFFFFF,
+    0xF9AC: 0x000010B9,
+    0xF9B0: 0x00006140,
+    0xF9B8: 0x00409650,
+    0xF9BC: 0xFFFFFFFF,
+    0xF9C4: 0x000010B9,
+    0xF9C8: 0x00006140,
+    0xF9D4: 0x00000003,
+    0xF9DC: 0x00006521,
+    0xF9E0: 0x00007F27,
+    0xF9EC: 0x00000CCB,
+    0xF9F0: 0x00007EA4,
+}
+
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -123,16 +166,21 @@ def read_member(archive: tarfile.TarFile, name: str) -> bytes:
 
 def build_payload() -> bytes:
     """Build the original GA102 rejoin15 payload (public API retained)."""
-    return _build_payload(PATCHED_WORDS)
+    return _build_payload(PATCHED_WORDS, FILL_DWORD)
 
 
 def build_ad102_payload() -> bytes:
     """Build the pinned AD102 four-write chain and explicit mailbox marker."""
-    return _build_payload(AD102_PATCHED_WORDS)
+    return _build_payload(AD102_PATCHED_WORDS, FILL_DWORD)
 
 
-def _build_payload(patched_words: dict[int, int]) -> bytes:
-    word = FILL_DWORD.to_bytes(4, "little")
+def build_tu102_payload() -> bytes:
+    """Build the pinned TU102 six-slot PLM chain (0x001fa7cc + 0x00409650)."""
+    return _build_payload(TU102_PATCHED_WORDS, TU102_FILL_DWORD)
+
+
+def _build_payload(patched_words: dict[int, int], fill_dword: int = FILL_DWORD) -> bytes:
+    word = fill_dword.to_bytes(4, "little")
     payload = bytearray(word * (PAYLOAD_SIZE // len(word)))
     for offset, value in patched_words.items():
         payload[offset : offset + 4] = value.to_bytes(4, "little")
@@ -160,12 +208,20 @@ def main() -> int:
     if sha256(gsp) != GSP_SHA256:
         raise SystemExit("GA10x GSP firmware SHA-256 does not match the pinned artifact")
 
+    try:
+        gsp_tu10x = extract_member(args.package, FIRMWARE_PREFIX + "gsp_tu10x.bin")
+    except ValueError:
+        gsp_tu10x = b""
+
     payload = build_payload()
     if sha256(payload) != PAYLOAD_SHA256:
         raise SystemExit("generated GA102 V67 image differs from its pinned SHA-256")
     ad102_payload = build_ad102_payload()
     if sha256(ad102_payload) != AD102_PAYLOAD_SHA256:
         raise SystemExit("generated AD102 V67 image differs from its pinned SHA-256")
+    tu102_payload = build_tu102_payload()
+    if sha256(tu102_payload) != TU102_PAYLOAD_SHA256:
+        raise SystemExit("generated TU102 V67 image differs from its pinned SHA-256")
     manifest = json.loads(MANIFEST.read_text())
     notice = manifest["source_artifacts"][2]["notice"]
     license_text = extract_member(args.package, notice["path"])
@@ -173,8 +229,11 @@ def main() -> int:
         raise SystemExit("NVIDIA license notice differs from pinned package")
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "gsp_ga10x.bin").write_bytes(gsp)
+    if gsp_tu10x:
+        (args.output / "gsp_tu10x.bin").write_bytes(gsp_tu10x)
     (args.output / "v67-ga102-610.43.03.bin").write_bytes(payload)
     (args.output / AD102_PAYLOAD_NAME).write_bytes(ad102_payload)
+    (args.output / TU102_PAYLOAD_NAME).write_bytes(tu102_payload)
     (args.output / "NVIDIA-LICENSE").write_bytes(license_text)
     return 0
 

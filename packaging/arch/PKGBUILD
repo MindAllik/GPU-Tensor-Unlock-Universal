@@ -4,13 +4,13 @@
 # For a published release, point the first source at the tagged tarball.
 pkgbase=gpu-unlock
 pkgname=(gpu-unlock-dkms gpu-unlock-firmware)
-pkgver=1.1.2
+pkgver=$(sed -n 's/^\*\*Version: \([0-9.]*\)\*\*$/\1/p' "${startdir:-.}/../../README.md" 2>/dev/null)
 pkgrel=1
 _nv=610.43.03
 _utils=nvidia-utils-$_nv-1-x86_64_v3.pkg.tar.zst
-pkgdesc='RTX 4090 and experimental RTX 4070 Ti SUPER / RTX 4070 Ti tensor unlock before NVIDIA loads'
+pkgdesc='Pre-driver Tensor Core unlocker for GeForce RTX 20 (Turing), RTX 30 (Ampere), and RTX 40 (Ada) series'
 arch=('x86_64')
-url='https://github.com/JustAResearcher/gpu-unlock-ada'
+url='https://github.com/MindAllik/GPU-Tensor-Unlock-Universal'
 license=('GPL-2.0-only')
 makedepends=('git' 'python' 'zstd')
 options=('!strip' '!debug')
@@ -24,7 +24,7 @@ sha256sums=('SKIP'
 
 prepare() {
   cd $pkgbase
-  test "$(cat VERSION)" = "$pkgver"
+  test "$(sed -n 's/^\*\*Version: \([0-9.]*\)\*\*$/\1/p' README.md)" = "$pkgver"
 }
 
 build() {
@@ -32,6 +32,7 @@ build() {
   python firmware/generate_v67.py "$(realpath "$srcdir/$_utils")" "$srcdir/assets"
   python firmware/extract_boot_assets.py "$srcdir/NVIDIA-kernel-module-source-$_nv" "$srcdir/assets"
   python firmware/extract_boot_assets.py "$srcdir/NVIDIA-kernel-module-source-$_nv" "$srcdir/assets" --chip ad102
+  python firmware/extract_boot_assets.py "$srcdir/NVIDIA-kernel-module-source-$_nv" "$srcdir/assets" --chip tu102
 }
 
 check() {

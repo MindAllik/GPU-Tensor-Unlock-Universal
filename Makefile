@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-VERSION    := $(shell cat VERSION)
+VERSION    := $(shell sed -n 's/^\*\*Version: \([0-9.]*\)\*\*$$/\1/p' README.md)
 NV         := 610.43.03
 PYTHON     ?= python3
 DESTDIR    ?=
@@ -13,11 +13,13 @@ LICENSEDIR ?= /usr/share/licenses
 PKG        ?= gpu-unlock
 
 MODULE_FILES   := $(filter-out %.mod.c,$(sort $(wildcard kernel/gpu_unlock/*.[ch]))) \
-                  kernel/gpu_unlock/Kbuild kernel/gpu_unlock/Makefile kernel/gpu_unlock/dkms.conf
+                  kernel/gpu_unlock/Kbuild kernel/gpu_unlock/Makefile
 FIRMWARE_FILES := booter_load_ga102.bin gsp_ga10x.bin gsp_boot_ga102.bin \
                   gsp_boot_desc_ga102.bin v67-ga102-$(NV).bin \
                   booter_load_ad102.bin gsp_boot_ad102.bin gsp_boot_desc_ad102.bin \
-                  v67-ad102-$(NV)-four-plm.bin
+                  v67-ad102-$(NV)-four-plm.bin \
+                  booter_load_tu102.bin gsp_tu10x.bin gsp_boot_tu102.bin \
+                  gsp_boot_desc_tu102.bin v67-tu102-$(NV).bin
 LICENSES       := licenses/GPL-2.0.txt licenses/CMP40HX-MIT.txt licenses/NVIDIA-MIT.txt
 NV_SOURCE      := NVIDIA-kernel-module-source-$(NV)
 NV_UTILS       := nvidia-utils-$(NV)-1-x86_64_v3.pkg.tar.zst
@@ -59,6 +61,7 @@ firmware:
 	$(PYTHON) firmware/generate_v67.py "$$(realpath $(INPUTS)/$(NV_UTILS))" $(ASSETS)
 	$(PYTHON) firmware/extract_boot_assets.py $(ASSETS).src/$(NV_SOURCE) $(ASSETS)
 	$(PYTHON) firmware/extract_boot_assets.py $(ASSETS).src/$(NV_SOURCE) $(ASSETS) --chip ad102
+	$(PYTHON) firmware/extract_boot_assets.py $(ASSETS).src/$(NV_SOURCE) $(ASSETS) --chip tu102
 
 assets: inputs
 	$(MAKE) firmware
@@ -66,9 +69,10 @@ assets: inputs
 # The module source. It does nothing unless gpu_unlock.targets= is on the
 # kernel command line.
 install-dkms:
-	grep -qx 'PACKAGE_VERSION="$(VERSION)"' kernel/gpu_unlock/dkms.conf
-	grep -q 'MODULE_VERSION("$(VERSION)")' kernel/gpu_unlock/main.c
+	test -n "$(VERSION)"
 	install -Dm644 -t $(DESTDIR)$(DKMSDIR) $(MODULE_FILES)
+	sed 's/@VERSION@/$(VERSION)/g' kernel/gpu_unlock/dkms.conf > $(DESTDIR)$(DKMSDIR)/dkms.conf
+	chmod 644 $(DESTDIR)$(DKMSDIR)/dkms.conf
 	install -Dm644 README.md $(DESTDIR)/usr/share/doc/gpu-unlock/README.md
 
 # The generators check every file against its pinned SHA-256 before writing it.
@@ -126,6 +130,7 @@ deb: dist inputs
 	rm -rf $(DEBDIR)
 	mkdir -p $(DEBDIR)
 	tar -xf $(TARBALL) -C $(DEBDIR)
+	sed -i 's/@VERSION@/$(VERSION)/g' $(DEBDIR)/gpu-unlock-$(VERSION)/debian/changelog
 	cd $(DEBDIR)/gpu-unlock-$(VERSION) && \
 		GPU_UNLOCK_INPUTS=$(abspath $(INPUTS)) dpkg-buildpackage -us -uc
 
@@ -139,7 +144,7 @@ rpm: dist inputs
 	mkdir -p $(RPMDIR)/SOURCES
 	cp $(TARBALL) $(RPMDIR)/SOURCES/
 	ln -s $(abspath $(INPUTS))/$(NV_SOURCE).tar.xz $(abspath $(INPUTS))/$(NV_UTILS) $(RPMDIR)/SOURCES/
-	rpmbuild -ba --define "_topdir $(RPMDIR)" packaging/rpm/gpu-unlock.spec
+	rpmbuild -ba --define "_topdir $(RPMDIR)" --define "pkg_version $(VERSION)" packaging/rpm/gpu-unlock.spec
 
 install-rpm:
 	sudo dnf install -y rpm-build

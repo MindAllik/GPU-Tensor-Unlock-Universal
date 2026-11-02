@@ -1,4 +1,6 @@
-# RTX 4070 Ti SUPER (10de:2705) Ada canary
+# RTX 4070 Ti SUPER (10de:2705) Ada Canary Report
+
+> **Reference Upstream Report**: RTX 4070 Ti SUPER (`10de:2705`, `AD103`) validation report (source: **[JustAResearcher/gpu-unlock-ada](https://github.com/JustAResearcher/gpu-unlock-ada)**, commit `4e7fefcc4923f9e083d5324dc75a7d2f906af77f`, Linux `5.15.0-177-generic`, 240 W power limit).
 
 On October 23, 2026, the AD102-family four-PLM payload ran on one cold
 RTX 4070 Ti SUPER (`10de:2705`, 66 SMs) before the unmodified NVIDIA
@@ -8,8 +10,8 @@ A second full AC cycle later restored the same unlock
 selector readbacks, but the FP16/BF16 throughput test was not repeated on that
 second boot. This does not establish support for every AD103 board.
 The [evidence directory](evidence/ada2705/README.md) contains unedited
-benchmark stdout, selected boot messages, rate readbacks and sanitized mining
-recovery lines, each with a SHA-256 manifest.
+benchmark stdout, selected boot messages, and rate readbacks, each with a
+SHA-256 manifest.
 
 The Linux kernel was `5.15.0-177-generic`. The source module was built from
 commit `a7bcce015fd034cb930f5acc7f2ce4f60158f5bd`; the resulting `.ko`
@@ -18,9 +20,6 @@ The initial cold tests loaded it from a one-time initramfs entry with the
 **single exact PCI target** and `ad103_experimental=1`. The normal boot entry
 stayed unchanged.
 No host identifiers or customer credentials are included here.
-Release 1.1.0 changes only module metadata and the DKMS package version
-relative to that tested kernel logic. The 1.1.0 module separately compiled
-against the same 5.15 headers, but has not had another cold hardware run.
 
 ## Firmware and driver checks
 
@@ -147,36 +146,24 @@ workloads, and all-one inputs do not validate arbitrary numerical inputs.
 No TF32 or INT4 application-level speedup is claimed here. The
 [GPL source and reproduction steps](../diagnostics/bench/README.md) are included.
 
-The owner miner resumed after the benchmarks on the same GPU and 240 W cap,
-reconnected to its existing pool, and advanced from 2 to 3 accepted shares
-with zero rejected shares in its new process log. A later status sample showed
-17 accepted and zero rejected at the same 240 W cap. This shows workload recovery;
-it is not evidence of a mining speedup from the tensor unlock.
-After the second cold cycle restored the Ada override, the owner miner again
-connected to its pool at 240 W and logged a fresh accepted share (`1/0`).
-After the TF32/INT4 comparison, the Ada boot was restored and the owner miner
-advanced from one to two accepted shares with zero rejects at the same cap.
-
 ## Boot persistence on the tested card
 
 An ordinary warm reboot selected the same Ada entry for one boot without
 cutting AC power. Before its firmware transaction, the card reported
 `wpr2_hi=0`, and the module again logged the payload marker, selector
 readbacks, and `gpu_unlock: unlocked`. The independent NVIDIA RM getter again
-reported full FMLA32, IMLA2, and IMLA4 rates; the owner miner reconnected and
-submitted a fresh `1/0` accepted share. This establishes that a warm reboot
+reported full FMLA32, IMLA2, and IMLA4 rates. This establishes that a warm reboot
 returned **this card on this host** to an eligible pre-driver state. It does
 not establish the same behavior on other boards.
 
 The tested Ada EFI entry was then made the **persistent default**, while the
 original stock entry and its `loader.conf` remained unchanged. A second
 ordinary warm reboot used that default with no one-time selection. The module
-again logged `gpu_unlock: unlocked`, the RM getter again read full rates, and
-the owner miner submitted another fresh `1/0` accepted share at the 240 W cap.
+again logged `gpu_unlock: unlocked` and the RM getter again read full rates at
+the 240 W cap.
 The [selected boot evidence](evidence/ada2705/warm-boot-persistence-excerpt.txt)
-contains both transaction excerpts, the EFI selection, rate readback, and
-accepted-share line. No NVRM Xid or GSP/SEC2 timeout appeared in the second
-boot's kernel log scan.
+contains both transaction excerpts and the rate readback. No NVRM Xid or
+GSP/SEC2 timeout appeared in the second boot's kernel log scan.
 
 ## Limits and reproduction
 

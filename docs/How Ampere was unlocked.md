@@ -1,36 +1,28 @@
-# How Nvidia Ampere generation GPUs got unlocked
+# NVIDIA Ampere and Ada Lovelace Pre-Driver Unlock Mechanism
 
-In the past few months various unlocks of Nvidia Ampere GPUs have popped up that all exploit the same fundamental flaw in the boot process.
+> **Attribution & Scope**: This technical reference summarizes the GSP/SEC2 bootstrap sequence and Privilege Level Mask (`PLM`) transitions on NVIDIA Ampere (`GA10x`) and Ada Lovelace (`AD10x`) architectures based on the research published by **Jon Pry** (*"A Canary in the Crypto Mine"*, DOI `10.5281/zenodo.20916112`), **[Consensus-Protocol/cmp170hx](https://github.com/Consensus-Protocol/cmp170hx)**, **[WildFlash1st/cmp90hx-unlock](https://github.com/WildFlash1st/cmp90hx-unlock)**, **[TOTORONG/AD103_win_unlocker](https://huggingface.co/TOTORONG/AD103_win_unlocker)**, and **[Zagitta/gpu-unlock](https://github.com/Zagitta/gpu-unlock)**.
 
-Amongst these the most famous is probably [https://github.com/amoghmunikote/cmpunlocker](https://github.com/amoghmunikote/cmpunlocker), that's been covered on LTT and various other famous sites, which unlocks the 8/10 GB CMP 170hx cards to 64GB and 40GB respectively.
+## 1. The Ampere and Ada Lovelace Boot Process
 
-## The Ampere boot process
+In both Nouveau and NVIDIA's open GPU kernel driver (`open-gpu-kernel-modules`), the standard GSP initialization sequence proceeds through six stages:
 
-In short both Nouveau and NVIDIA's open GPU driver boot process looks like this:
+### 1.1. PCI Initialization
+The host driver (or pre-boot UEFI loader) probes the PCIe function, maps Base Address Register 0 (`BAR0`) for Memory-Mapped I/O (`MMIO`) access, and allocates Direct Memory Access (`DMA`) buffers in host memory.
 
-### 1. PCI initialization:
+### 1.2. Firmware Loading
+The host retrieves the required firmware images (`gsp_ga10x.bin`, `booter_load_*.bin`, and `gsp_boot_*.bin`), containing the GPU System Processor Resource Manager (`GSP-RM`), bootloaders, and auxiliary microcode.
 
-The kernel driver probes the GPU, maps Base Address Registers (BAR) for Memory-mapped I/O (MMIO) access, and establishes Direct Memory Access-capable (DMA) memory.
+### 1.3. Initial Hardware Setup
+VBIOS-resident Firmware Security (`FWSEC`) and `DEVINIT` microcode initialize core hardware state, including VRAM training, clocks, and power sequencing during GPU reset/POST (`GFW_BOOT`).
 
-### 2. Firmware loading
+### 1.4. Secure Boot Preparation (`FWSEC-FRTS`)
+The host executes `FWSEC` Firmware Runtime Services (`FRTS`) from the board's VBIOS ROM on the GSP Falcon in Heavy-Secure (`HS`) mode, establishing a protected memory region (`WPR2`) at the top of VRAM.
 
-The driver retrieves firmware blobs using the Linux firmware infrastructure (Nouveau uses request_firmware()), including GPU System Processor – Resource Manager (GSP-RM), bootloaders, and auxiliary microcode.
+### 1.5. GSP Bootstrap (`SEC2 Booter`)
+The host loads a signed `Booter` image onto the Security Engine 2 (`SEC2`) Falcon processor. `SEC2` authenticates the signature in `WPR` metadata, prepares the GSP boot image inside `WPR2`, and releases the GSP RISC-V core.
 
-### 3. Initial hardware setup
-
-VBIOS-provided Firmware Security (FWSEC) and devinit firmware initialize critical hardware, including VRAM, clocks, and power sequencing. Much of this happens before the driver loads.
-
-### 4. Secure boot preparation
-
-The driver executes FWSEC Firmware Runtime Services (FRTS) on the GPU System Processor (GSP) Falcon in heavy-secure mode, establishing a protected VRAM region (WPR2).
-
-### 5. GSP bootstrap
-
-The driver launches a signed Booter firmware on the Security Engine 2 (SEC2) security processor. SEC2 authenticates and loads GSP-RM onto the GSP.
-
-### 6. Runtime initialization
-
-GSP-RM starts, initializes GPU subsystems, and establishes shared-memory RPC queues with the host driver.
+### 1.6. Runtime Initialization
+`GSP-RM` starts on the GSP processor, initializes GPU subsystems, and establishes shared-memory RPC queues with the host display driver.
 
 ```mermaid
 flowchart TD
@@ -68,34 +60,17 @@ flowchart TD
     class V67,BUG,ROP,PLM,OVR attack
     class FWSEC,FRTS,BROM,HS secure
     class RM,RPC success
-
 ```
 
+## 2. The SEC2 Booter V67 Vulnerability
 
+During the `SEC2` bootstrap stage, `SEC2` executes the signed `Booter` microcode in Heavy-Secure (`Level 3`) privilege mode. Before verifying the GSP image signature, the `Booter` copies the RSA signature buffer from host DMA memory into `SEC2` Data Memory (`DMEM` base `0x0600`) using the transfer length specified in `WprMeta`.
 
+In the `610.43.03` Booter revision, the bounds check on the signature length occurs *after* the DMA copy helper returns. Supplying a `0xfa00`-byte (64,000-byte) signature buffer overflows `DMEM` from `0x0600` through `0xffff`, overwriting the active stack frame (`DMEM 0xff30–0xffff`) while preserving the expected stack canary value (`0xff4c`) from the known global canary location (`0x6140` on `GA102`, `0x5f50` on `AD102`).
 
+Because NVIDIA's `open-gpu-kernel-modules` archive included both production (`IMAGE_PROD`) and debug (`IMAGE_DBG`) Booter blobs, and the debug blobs were encrypted with a publicly documented AES test key (Key Index 37), upstream researchers were able to disassemble the Falcon `FUC5` instruction stream and identify Return-Oriented Programming (`ROP`) gadgets inside the signed production Booter.
 
-## The "secure" boot preparation
-
-This is where the exploit happens and it's rather ingenious.
-
-The SEC2 runs firmware (booter) loaded by the driver via hardware DMA that does the decryption and verification.
-The job of this firmware is to receive the encrypted GSP firmware from the driver via a DMA channel, verify the signature, decrypt it and finally execute it on the GSP.
-
-Unfortunately for Nvidia the booter is vulnerable to a classic buffer overflow that writes straight into the stack which gives us the ability to execute code via Return Oriented Programming (ROP).
-
-ROPs basically exploit a common functionality in many CPU architectures to have dedicated instructions for calling and returning from functions. The `call` instruction will jump to code at a specific address but before doing so push the address of the instruction right after itself onto the stack. The return (`ret`) instruction pops this address from the stack and jumps there to continue in the original function.
-Since we can write arbitrary values to the stack we can now control this return address and start to string pieces of firmware code together to build our exploit.
-
-These pieces of existing code are referred to as "gadgets" and is finding them is referred to as "mining".
-Now you might wonder how did anyone ever figure out that the booter firmware happens to have a buffer overflow when the firmware is completely inaccessible?
-As it turns out Nvidia fucked up more than once and for a while published both debug and production booter firmware blobs which in of itself isn't a problem as they're all encrypted.
-But as it turns out some very clever people found out that Nvidia encrypted the debug image with a known public test-key scheme (key index 37). So with the decrypted firmware it could now be dissassembled and mined for gadgets.
-The debug image isn't *exactly* the same as the production one but it's remarkably similar.
-
-Armed with these tools it was just a matter of time before researchers would figure out how to exploit the access gained with code execution in "heavy secure" mode.
-
-Eventually this resulted in the v67 payload that this driver uses. The payload utilizes a sequence of gadgets that eventually writes a word (4 bytes) from the payload to a word address also from the payload effectively giving us a single `MEMORY[payload_address_word] = payload_value_word` write.
+The resulting **V67 payload** that the pre-driver unlock transaction uses chains existing instructions inside the authenticated `SEC2 Booter` to perform privileged 32-bit MMIO register writes (`MEMORY[target_register] = target_value`) from `Level 3` context before halting `SEC2` cleanly.
 
 ```mermaid
 flowchart TD
@@ -128,8 +103,8 @@ flowchart TD
 
     subgraph RESEARCH["V67 RESEARCH-ONLY PATH"]
         V67["V67 payload"]
-        BUG["Vulnerable signed<br/>debug Booter path"]
-        ROP["Control-flow hijack"]
+        BUG["Vulnerable signed<br/>Booter DMA path"]
+        ROP["Control-flow redirection"]
         V67 --> BUG
         BUG --> ROP
     end
@@ -143,52 +118,42 @@ flowchart TD
     class V67,BUG,ROP,PLM,OVR attack
     class FWSEC,FRTS,BROM,HS secure
     class RM,RPC success
-
 ```
 
+## 3. Unlocking: Speed-Select Registers and Privilege Level Masks (1-Write vs. 4-Write Chains)
 
+The instruction issue rate of Streaming Multiprocessor (`SM`) execution units is governed by two feature-override speed-select registers:
 
+| Name | Address | Cold Default (`GA102`) | Governs |
+| :--- | :--- | :--- | :--- |
+| `FEAT_OVR_SM_SPD` (`SS0`) | `0x0082381c` | `0x00000001` | Eight 4-bit fields covering `DP`, `FFMA`, `FMLA16`, `FMLA32`, and `IMLA0–3` |
+| `FEAT_OVR_SM_SPD_1` (`SS1`) | `0x00823820` | `0x00000001` | One 4-bit field at `[3:0]`, attributed to `IMLA4` |
 
+Each 4-bit nibble is encoded as:
+- `bit 3` (`0x8`): Override enabled
+- `bits 2:0`: Speed divider
+  - `000` (`0`) = Full rate (`1/1`)
+  - `001` (`1`) = Half rate (`1/2`)
+  - `010` (`2`) = Quarter rate (`1/4`)
+  - `011` (`3`) = Eighth rate (`1/8`)
 
-## Unlocking
+Writing `0x88888888` to `SS0` (`0x0082381c`) and `0x00000008` to `SS1` (`0x00823820`) enables the override and sets every field's divider to `0` (full `1/1` issue rate). However, direct writes from the host CPU (`Level 0`) to `0x0082381c` and `0x00823820` are ignored by default because write access is restricted by Privilege Level Mask (`PLM`) registers.
 
-The registers that governs the issue rate of various instructions are
+As documented in the [Consensus-Protocol/cmp170hx PLM bitfield model](https://github.com/Consensus-Protocol/cmp170hx/blob/main/docs/unlock/privilege-level-masks.md#2-bit-encoding), a PLM register encodes access rights as:
+- **Bits `[3:0] = READ_PROTECTION`**: One bit per privilege level (`L0`/`L1`/`L2`/`L3`). A set bit permits reads from that level.
+- **Bits `[7:4] = WRITE_PROTECTION`**: One bit per privilege level (`L0`/`L1`/`L2`/`L3`). A set bit permits writes from that level.
+- **Bits `[23:8] = SOURCE_ENABLE`**: Controls which on-die engines may issue transactions.
 
+Both `SS0` and `SS1` are governed by `FEAT_OVR_PLM` at `0x00823804`, whose cold value is `0xffffff8f` (`0x8f` = `1000 1111` binary: readable by `L0–L3`, writable only by `L3` Heavy-Secure microcode).
 
-| Name                        | Address      | GA102 default value | Governs                                                           |
-| --------------------------- | ------------ | ------------------- | ----------------------------------------------------------------- |
-| `FEAT_OVR_SM_SPD` (`SS0`)   | `0x0082381c` | `0x00000001`        | Eight 4-bit fields covering DP, FFMA, FMLA16, FMLA32, and IMLA0–3 |
-| `FEAT_OVR_SM_SPD_1` (`SS1`) | `0x00823820` | `0x00000001`        | One 4-bit field at [3:0], attributed to IMLA4                     |
+### 3.1. Ampere (`GA10x`): 1-Write PLM Chain
+On Ampere (`GA102`–`GA106`), the V67 payload (`v67-ga102-610.43.03.bin`) executes a single `Level 3` store that writes `0xffffffff` to `FEAT_OVR_PLM` (`0x00823804`). Once `FEAT_OVR_PLM` is opened to `0xffffffff`, the host (`L0`) writes `0x88888888` to `SS0` (`0x0082381c`) and `0x8` to `SS1` (`0x00823820`), then issues a PCIe Function Level Reset (`FLR`) so the stock NVIDIA driver can initialize the GPU cleanly while `SS0`/`SS1` retain their unlocked values.
 
+### 3.2. Ada Lovelace (`AD10x`): 4-Write PLM Chain
+On Ada Lovelace (`AD102`–`AD107`), the payload (`v67-ad102-610.43.03-four-plm.bin`, constructed by `TOTORONG/AD103_win_unlocker`) executes four sequential `Level 3` permission stores inside the `AD102` `SEC2 Booter`:
+1. `WPR_CFG PLM` (`0x001fa7cc`) $\leftarrow$ `0xfffff0ff`
+2. `FBPA PLM` (`0x009a0148`) $\leftarrow$ `0xffffffff` *(observational; remains `0xffffff0f` on tested retail Ada boards)*
+3. `WPR PLM` (`0x001fa7c4`) $\leftarrow$ `0xffffffff`
+4. `FEAT_OVR_PLM` (`0x00823804`) $\leftarrow$ `0xffffffff`
 
-Each 4-bit field is encoded as:
-
-- `bit 3`: Override enabled
-- `bits 2:0`: Speed selector
-  - `00` = full rate
-  - `01` = 1/2 rate
-  - `10` = 1/4 rate (unconfirmed)
-  - `11` = 1/8 rate (unconfirmed)
-
-As such our target is to write `0x88888888` to `SS0` and `0x8` to `SS1` but naturally these aren't writeable from the host side (aka the driver) and writing there just does nothing, that would be too easy after all.
-So we need to write there somehow but the problem is our ROP gadget is already near the size limit so we cannot perform 2 writes and launching the booter multiple has it's own problems.
-But luckily the solution to everything in computer science is yet another indection and Nvidia thought so as well. So the access to these registers is actually governed by other registers called Privilige Level Masks (PLM).
-
-The [inferred from observed behavior model of the PLM bitfields](https://github.com/Consensus-Protocol/cmp170hx/blob/main/docs/unlock/privilege-level-masks.md#2-bit-encoding) describes the read/write level-enable masks as follows:
-
-- Bits `[3:0] = READ_PROTECTION`: one bit per privilege level (L0/L1/L2/L3). A set bit = that level may read.
-- Bits `[7:4] = WRITE_PROTECTION`: one bit per level. A set bit = that level may write.
-- Bits `[23:8] = SOURCE_ENABLE`: controls which on-die sources may issue accesses.
-
-Our two registers happens to be governed by the same `FEAT_OVR_PLM` register at `0x00823804` which contains `0xffffff8f` by default on all GA100 and GA102 cards.
-
-Reading `0x8f` in the low byte = `1000 1111`:
-
-- `[3:0] = 1111`: Readable from all four privilege levels.
-- `[7:4] = 1000`: Only L3 may write; L0/L1/L2 writes are blocked. In this model, L3 corresponds to the heavy-secure context, and bit 7 enables its writes.
-
-So with that all we've gotta do is write `0xFFFFFFFF` to `FEAT_OVR_PLM` from within our ROP gadget and suddenly `SS0+SS1` is writable from the host driver.
-
-> Great success
-
-As Borat would say.
+After completing the four stores, the chain writes the completion marker `0x67b00001` into `FALCON_MAILBOX0` (`0x00840040`) and halts `SEC2` (`CPUCTL = 0x10`). The host driver/UEFI loader verifies the marker, `SEC2 HALT`, and the required permission readbacks, writes `SS0 = 0x88888888` and `SS1 = 0x8`, verifies that the effective hardware speed-select readout (`0x00823818`) drops to `0x00000000`, and performs a `PCIe FLR` before handing the card off to the unmodified NVIDIA driver.

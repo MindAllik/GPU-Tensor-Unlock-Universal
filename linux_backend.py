@@ -31,8 +31,16 @@ FIRMWARE_SCRIPTS_DIR = APP_ROOT / "firmware"
 TOOLS_DIR = APP_ROOT / "tools"
 PACKAGING_BOOT_DIR = APP_ROOT / "packaging" / "boot"
 
-VERSION_FILE = APP_ROOT / "VERSION"
-MODULE_VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "1.1.2"
+def _read_project_version() -> str:
+    readme = APP_ROOT / "README.md"
+    if readme.is_file():
+        m = re.search(r"\*\*Version:\s*([0-9]+\.[0-9]+\.[0-9]+)\*\*", readme.read_text(encoding="utf-8", errors="replace"))
+        if m:
+            return m.group(1)
+    return "0.0.0"
+
+
+MODULE_VERSION = _read_project_version()
 NV_VERSION = "610.43.03"
 
 SYSTEM_FW_DIR = Path(f"/usr/lib/firmware/gpu-unlock/{NV_VERSION}")
@@ -41,6 +49,7 @@ SYSTEM_DKMS_DIR = Path(f"/usr/src/gpu-unlock-{MODULE_VERSION}")
 ALL_LINUX_FIRMWARE_SPECS: dict[str, tuple[int, str]] = {
     **core_detector.ASSET_SPECS_ADA,
     **core_detector.ASSET_SPECS_GA,
+    **core_detector.ASSET_SPECS_TU,
 }
 
 
@@ -355,13 +364,14 @@ def build_all_linux_firmware_assets(
     cache_dir = core_detector.CACHE_DIR
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Generate and verify both V67 payloads (GA102 and AD102)
-    for is_ada, v67_name in (
-        (False, "v67-ga102-610.43.03.bin"),
-        (True, "v67-ad102-610.43.03-four-plm.bin"),
+    # 1. Generate and verify all three V67 payloads (GA102, AD102, and TU102)
+    for arch_tag, is_ada, v67_name in (
+        ("ga102", False, "v67-ga102-610.43.03.bin"),
+        ("ad102", True, "v67-ad102-610.43.03-four-plm.bin"),
+        ("tu102", False, "v67-tu102-610.43.03.bin"),
     ):
         exp_sz, exp_sha = ALL_LINUX_FIRMWARE_SPECS[v67_name]
-        v67_bytes = core_detector.build_v67_payload(is_ada=is_ada)
+        v67_bytes = core_detector.build_v67_payload(is_ada=is_ada, arch=arch_tag)
         if len(v67_bytes) != exp_sz or core_detector.sha256_bytes(v67_bytes) != exp_sha:
             raise ValueError(f"Generated {v67_name} failed SHA-256 verification")
         core_detector._write_verified_file(assets_dir / v67_name, v67_bytes, exp_sha)
@@ -399,7 +409,7 @@ def build_all_linux_firmware_assets(
                             c_texts[target_c] = raw.decode("ascii")
             break
 
-    for chip_tag in ("ga102", "ad102"):
+    for chip_tag in ("ga102", "ad102", "tu102"):
         booter_c = f"g_bindata_kgspGetBinArchiveBooterLoadUcode_{chip_tag.upper()}.c"
         boot_c = f"g_bindata_kgspGetBinArchiveGspRmBoot_{chip_tag.upper()}.c"
         booter_bin = core_detector.build_booter_bundle(c_texts[booter_c])
@@ -416,32 +426,33 @@ def build_all_linux_firmware_assets(
             core_detector._write_verified_file(assets_dir / fname, blob, exp_sha)
             log_fn(f"[OK] Generated & verified {fname} ({exp_sz} bytes)")
 
-    # 3. Extract or reuse shared gsp_ga10x.bin (84,277,400 bytes)
-    gsp_dest = assets_dir / "gsp_ga10x.bin"
-    exp_gsp_sz, exp_gsp_sha = ALL_LINUX_FIRMWARE_SPECS["gsp_ga10x.bin"]
-    if gsp_dest.exists() and gsp_dest.stat().st_size == exp_gsp_sz and core_detector.sha256_file(gsp_dest) == exp_gsp_sha:
-        log_fn("[OK] Reused verified gsp_ga10x.bin in assets cache")
-    else:
-        cached_gsp = cache_dir / "gsp_ga10x.bin"
-        if not (cached_gsp.exists() and cached_gsp.stat().st_size == exp_gsp_sz and core_detector.sha256_file(cached_gsp) == exp_gsp_sha):
-            shared_gsp = core_detector._find_shared_cached_file("gsp_ga10x.bin", exp_gsp_sha, log_fn)
-            if shared_gsp is not None:
-                shutil.copy2(shared_gsp, cached_gsp)
-        if not (cached_gsp.exists() and cached_gsp.stat().st_size == exp_gsp_sz and core_detector.sha256_file(cached_gsp) == exp_gsp_sha):
-            pkg_path = core_detector.download_verified(
-                core_detector.PACKAGE_URL,
-                cache_dir / "nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst",
-                core_detector.PACKAGE_SHA256,
-                log_fn,
-            )
-            log_fn("[EXTRACT] Unpacking gsp_ga10x.bin (84.2 MB)...")
-            core_detector.extract_gsp_from_zst(pkg_path, cached_gsp)
-            if core_detector.sha256_file(cached_gsp) != exp_gsp_sha:
-                cached_gsp.unlink(missing_ok=True)
-                raise ValueError("Extracted gsp_ga10x.bin SHA-256 mismatch!")
-            core_detector._save_to_shared_cache(cached_gsp, exp_gsp_sha)
-        core_detector._write_verified_file(gsp_dest, cached_gsp.read_bytes(), exp_gsp_sha)
-        log_fn("[OK] Staged & verified gsp_ga10x.bin (84,277,400 bytes)")
+    # 3. Extract or reuse gsp_ga10x.bin and gsp_tu10x.bin
+    for gsp_fname in ("gsp_ga10x.bin", "gsp_tu10x.bin"):
+        gsp_dest = assets_dir / gsp_fname
+        exp_gsp_sz, exp_gsp_sha = ALL_LINUX_FIRMWARE_SPECS[gsp_fname]
+        if gsp_dest.exists() and gsp_dest.stat().st_size == exp_gsp_sz and core_detector.sha256_file(gsp_dest) == exp_gsp_sha:
+            log_fn(f"[OK] Reused verified {gsp_fname} in assets cache")
+        else:
+            cached_gsp = cache_dir / gsp_fname
+            if not (cached_gsp.exists() and cached_gsp.stat().st_size == exp_gsp_sz and core_detector.sha256_file(cached_gsp) == exp_gsp_sha):
+                shared_gsp = core_detector._find_shared_cached_file(gsp_fname, exp_gsp_sha, log_fn)
+                if shared_gsp is not None:
+                    shutil.copy2(shared_gsp, cached_gsp)
+            if not (cached_gsp.exists() and cached_gsp.stat().st_size == exp_gsp_sz and core_detector.sha256_file(cached_gsp) == exp_gsp_sha):
+                pkg_path = core_detector.download_verified(
+                    core_detector.PACKAGE_URL,
+                    cache_dir / "nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst",
+                    core_detector.PACKAGE_SHA256,
+                    log_fn,
+                )
+                log_fn(f"[EXTRACT] Unpacking {gsp_fname} ({exp_gsp_sz / (1024 * 1024):.1f} MB)...")
+                core_detector.extract_gsp_from_zst(pkg_path, cached_gsp, member_name=gsp_fname)
+                if core_detector.sha256_file(cached_gsp) != exp_gsp_sha:
+                    cached_gsp.unlink(missing_ok=True)
+                    raise ValueError(f"Extracted {gsp_fname} SHA-256 mismatch!")
+                core_detector._save_to_shared_cache(cached_gsp, exp_gsp_sha)
+            core_detector._write_verified_file(gsp_dest, cached_gsp.read_bytes(), exp_gsp_sha)
+            log_fn(f"[OK] Staged & verified {gsp_fname} ({exp_gsp_sz:,} bytes)")
 
     # 4. Stage NVIDIA-LICENSE for Makefile install-firmware compatibility
     nv_lic_src = APP_ROOT / "licenses" / "NVIDIA-MIT.txt"
@@ -590,8 +601,8 @@ def export_linux_bundle_to_folder(
     bundle_dir = out_root / f"gpu-unlock-linux-bundle-{MODULE_VERSION}"
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
-    # Copy Makefile, VERSION, kernel/, packaging/, licenses/, tools/
-    for item_name in ("Makefile", "VERSION", "README.md", "QUICKSTART.md"):
+    # Copy Makefile, README.md, kernel/, packaging/, licenses/, tools/
+    for item_name in ("Makefile", "README.md", "QUICKSTART.md"):
         src_p = APP_ROOT / item_name
         if src_p.is_file():
             shutil.copy2(src_p, bundle_dir / item_name)
@@ -727,12 +738,26 @@ def build_and_apply_linux_unlock(
     env_info: dict[str, Any],
     log_fn: Callable[[str], None] = print,
 ) -> dict[str, Any]:
-    """Build SHA-256 verified 610.43.03 firmware, compile gpu_unlock.ko, and apply modprobe gpu_unlock live."""
-    assets_dir = build_all_linux_firmware_assets(log_fn=log_fn)
+    """Build SHA-256 verified 610.43.03 firmware, compile gpu_unlock.ko, and apply live modprobe
+    (or automatically fall back to staging early-boot initramfs hooks if a display driver is already bound)."""
     modprobe_cmd = env_info.get("linux_modprobe_cmd") or "modprobe gpu_unlock targets=all"
     if modprobe_cmd == "UNSUPPORTED":
         raise ValueError("Cannot apply unlock: selected GPU is not in SUPPORT_MATRIX.")
 
+    bound_drv = str(env_info.get("bound_driver") or "unknown").strip().lower()
+    if bound_drv not in ("", "unbound", "none", "unknown"):
+        log_fn("-" * 76)
+        log_fn(
+            f"[INFO] Target GPU ({env_info.get('pci_bdf', 'N/A')}) is currently bound to '{bound_drv}'. "
+            "Because kernel/gpu_unlock/main.c refuses live mutation on a driver-bound GPU (-EBUSY), "
+            "automatically staging the DKMS module, firmware, and early-boot initramfs hook for the next cold boot..."
+        )
+        res = install_linux_dkms_and_firmware(env_info, log_fn=log_fn)
+        res["modprobe_cmd"] = modprobe_cmd
+        res["mode"] = "early_boot_initramfs"
+        return res
+
+    assets_dir = build_all_linux_firmware_assets(log_fn=log_fn)
     script_cmd = (
         f"set -e; cd '{APP_ROOT}' && "
         f"make ASSETS='{assets_dir}' install-dkms install-firmware install-licenses && "
@@ -743,12 +768,22 @@ def build_and_apply_linux_unlock(
         f"{modprobe_cmd}"
     )
     log_fn("-" * 76)
-    log_fn(f"[APPLY] Installing firmware + building gpu_unlock.ko + executing: {modprobe_cmd}")
+    log_fn(f"[APPLY] Installing firmware + building gpu_unlock.ko + executing live: {modprobe_cmd}")
     rc = _run_privileged_shell(script_cmd, log_fn)
+    if rc != 0:
+        log_fn(
+            "[WARN] Live modprobe returned non-zero (card may have bound to nvidia). "
+            "Falling back to staging early-boot initramfs hook..."
+        )
+        res = install_linux_dkms_and_firmware(env_info, log_fn=log_fn)
+        res["modprobe_cmd"] = modprobe_cmd
+        res["mode"] = "early_boot_initramfs"
+        return res
     return {
         "returncode": rc,
         "assets_dir": str(assets_dir),
         "modprobe_cmd": modprobe_cmd,
+        "mode": "live_modprobe",
     }
 
 

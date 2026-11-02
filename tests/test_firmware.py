@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Pin the separate V67 chains and their payload-to-DMEM bookkeeping."""
+"""Pin the separate V67 chains (GA102, AD102, TU102) and their payload-to-DMEM bookkeeping."""
 import hashlib
 import json
 from pathlib import Path
@@ -18,6 +18,7 @@ class FirmwareTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.manifest = json.loads((ROOT / "firmware/artifacts-610.43.03.json").read_text())
+        cls.turing_manifest = json.loads((ROOT / "firmware/turing-610.43.03.json").read_text())
 
     def test_ad102_exact_payload_and_fill(self):
         payload = generate_v67.build_ad102_payload()
@@ -34,6 +35,23 @@ class FirmwareTests(unittest.TestCase):
         for offset in range(0, len(payload), 4):
             self.assertEqual(struct.unpack_from("<I", payload, offset)[0],
                              overrides.get(offset, 0x19c), hex(offset))
+
+    def test_tu102_exact_payload_and_fill(self):
+        payload = generate_v67.build_tu102_payload()
+        entry = self.manifest["generated_tu102_payload"]
+        turing_entry = self.turing_manifest["payload"]
+        digest = hashlib.sha256(payload).hexdigest()
+        self.assertEqual(len(payload), 64000)
+        self.assertEqual(digest, "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024")
+        self.assertEqual(digest, generate_v67.TU102_PAYLOAD_SHA256)
+        self.assertEqual(digest, entry["sha256"])
+        self.assertEqual(digest, turing_entry["sha256"])
+        overrides = {int(word["offset"], 0): int(word["value"], 0)
+                     for word in entry["overrides"]}
+        self.assertEqual(len(overrides), 31)
+        for offset in range(0, len(payload), 4):
+            self.assertEqual(struct.unpack_from("<I", payload, offset)[0],
+                             overrides.get(offset, 0x4a7), hex(offset))
 
     def test_ad102_ordered_arguments_marker_and_cleanup(self):
         payload = generate_v67.build_ad102_payload()
@@ -83,17 +101,18 @@ class FirmwareTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(generate_v67.build_payload()).hexdigest(),
                          "2a0aa1f86d0b6afff5214d641d87d46dc98ef06ed908ff05d0ddbad5ffb7e197")
 
-    def test_firmware_install_includes_both_payloads_and_licenses(self):
+    def test_firmware_install_includes_all_three_payloads_and_licenses(self):
         payloads = {
             "v67-ga102-610.43.03.bin": generate_v67.build_payload(),
             "v67-ad102-610.43.03-four-plm.bin": generate_v67.build_ad102_payload(),
+            "v67-tu102-610.43.03.bin": generate_v67.build_tu102_payload(),
         }
         with tempfile.TemporaryDirectory() as directory:
             assets = Path(directory) / "assets"
             destination = Path(directory) / "install"
             assets.mkdir()
-            expected = set(self.manifest["derived_assets"]) | {"gsp_ga10x.bin"} | set(payloads)
-            self.assertEqual(len(expected), 9)
+            expected = set(self.manifest["derived_assets"]) | {"gsp_ga10x.bin", "gsp_tu10x.bin"} | set(payloads)
+            self.assertEqual(len(expected), 14)
             for filename in expected:
                 (assets / filename).write_bytes(payloads.get(filename, b"fixture"))
             (assets / "NVIDIA-LICENSE").write_text("fixture license\n")

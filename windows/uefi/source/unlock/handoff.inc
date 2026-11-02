@@ -65,10 +65,13 @@ static EFI_STATUS PreloadWindows(VOID) {
   return GuLogReady()?EFI_SUCCESS:EFI_DEVICE_ERROR;
 }
 static EFI_STATUS VerifySelectors(const char *phase) {
-  UINT32 ss0=GuRead32(0x82381c),ss1=GuRead32(0x823820),plm=GuRead32(0x823804);
+  UINT32 ss0=GuRead32(GU_FEAT_SS0_OFFSET),ss1=GuRead32(GU_FEAT_SS1_OFFSET),plm=GuRead32(GU_FEAT_PLM_OFFSET);
   GuLog("%s SS0=0x%08x SS1=0x%08x FEAT_PLM=0x%08x\n",phase,ss0,ss1,plm);
   GuLog("%s unlock_matched=%u; handoff checks GPU accessibility separately\n",phase,ss0==0x88888888 && ss1==8);
-#if !defined(GU_ARCH_ADA) || GU_ARCH_ADA
+#if defined(GU_ARCH_TURING) && GU_ARCH_TURING
+  GuLog("%s effective speed readout=skipped-tu-profile\n",phase);
+  BOOLEAN arch_ok=((plm&0xffff0000U)!=0xbadf0000U) && (plm==GU_EXPECTED_POST_FLR_PLM);
+#elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
   UINT32 effective=GuRead32(0x823818);
   GuLog("%s effective speed readout=%#x\n",phase,effective);
   BOOLEAN arch_ok=((effective&0x07ffffffU)==0) && (plm==GU_EXPECTED_POST_FLR_PLM);

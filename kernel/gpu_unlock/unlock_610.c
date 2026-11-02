@@ -39,6 +39,11 @@
 #define BOOT_FILE_AD102 "gpu-unlock/610.43.03/gsp_boot_ad102.bin"
 #define BOOT_DESC_FILE_GA102 "gpu-unlock/610.43.03/gsp_boot_desc_ga102.bin"
 #define BOOT_DESC_FILE_AD102 "gpu-unlock/610.43.03/gsp_boot_desc_ad102.bin"
+#define BOOTER_FILE_TU102 "gpu-unlock/610.43.03/booter_load_tu102.bin"
+#define V67_FILE_TU102 "gpu-unlock/610.43.03/v67-tu102-610.43.03.bin"
+#define GSP_FILE_TU10X "gpu-unlock/610.43.03/gsp_tu10x.bin"
+#define BOOT_FILE_TU102 "gpu-unlock/610.43.03/gsp_boot_tu102.bin"
+#define BOOT_DESC_FILE_TU102 "gpu-unlock/610.43.03/gsp_boot_desc_tu102.bin"
 /* The GSP boot image is bounded only by the boot descriptor, which has to
  * describe its own size; this just keeps a bad asset from being huge. */
 #define BOOT_FILE_MAX (1u << 20)
@@ -72,6 +77,16 @@ static const struct gpu_unlock_assets *unlock_assets(const struct pci_dev *pdev)
 		.arch = GU_BOOTER_AD10X, .boot_image_size = 36864,
 	};
 
+	static const struct gpu_unlock_assets tu102 = {
+		.booter = BOOTER_FILE_TU102, .gsp = GSP_FILE_TU10X,
+		.boot = BOOT_FILE_TU102, .desc = BOOT_DESC_FILE_TU102,
+		.payload = V67_FILE_TU102,
+		.signature_section = ".fwsignature_tu10x",
+		.arch = GU_BOOTER_TU10X, .boot_image_size = 24576,
+	};
+
+	if (gu_is_any_turing_id(pdev->device))
+		return &tu102;
 	return gu_is_any_ada_id(pdev->device) ? &ad102 : &ga102;
 }
 
@@ -316,6 +331,26 @@ static bool is_ad102(const struct unlock_transaction_work *work)
 	/* AD103 and AD104 use the same pinned AD102-family Booter archive.
 	 * Hardware behavior on 0x2705 and 0x2782 requires an exact-card opt-in. */
 	return gu_is_any_ada_id(work->pdev->device);
+}
+
+static bool is_tu102(const struct unlock_transaction_work *work)
+{
+	return gu_is_any_turing_id(work->pdev->device);
+}
+
+static u32 feat_plm_offset(const struct unlock_transaction_work *work)
+{
+	return is_tu102(work) ? GU_TU102_FEAT_PLM_OFFSET : GU_FEAT_PLM_OFFSET;
+}
+
+static u32 feat_ss0_offset(const struct unlock_transaction_work *work)
+{
+	return is_tu102(work) ? GU_TU102_FEAT_SS0_OFFSET : GU_FEAT_SS0_OFFSET;
+}
+
+static u32 feat_ss1_offset(const struct unlock_transaction_work *work)
+{
+	return is_tu102(work) ? GU_TU102_FEAT_SS1_OFFSET : GU_FEAT_SS1_OFFSET;
 }
 
 static const struct {
@@ -619,7 +654,7 @@ static int falcon_hs(struct unlock_transaction_work *work, const struct falcon_e
 			    identity != pci_identity(work->pdev) ||
 			    read_bar(work, eng->base + 0x100, &engine) || engine == ~0u ||
 			    (engine & 0xffff0000u) == 0xbadf0000u ||
-			    read_bar(work, GU_FEAT_PLM_OFFSET, &plm) ||
+			    read_bar(work, feat_plm_offset(work), &plm) ||
 			    (is_ad102(work) && read_bar(work, eng->base + 0x40, &marker)))
 				return GU_RESULT(-ENODEV);
 			/* Ada's explicit marker is independent evidence that all-ones PLM
@@ -864,7 +899,16 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 	u32 mb, vga, lo, hi, plm;
 	int ret;
 
-	if (read_bar(work, 0x001183a4, &mb) || !mb || mb == ~0u ||
+	if (read_bar(work, 0x001183a4, &mb) || !mb || inaccessible(mb)) {
+		u32 cap = 0;
+		if (!is_tu102(work) || read_bar(work, GU_TU102_LOCAL_MEM_RANGE_OFFSET, &cap) ||
+		    !cap || inaccessible(cap))
+			return GU_RESULT(-ENODEV);
+		mb = (u32)(((u64)((cap >> 4) & 63u) << (cap & 15u)));
+		if (cap & (1u << 30))
+			mb = (mb / 16u) * 15u;
+	}
+	if (!mb ||
 	    read_bar(work, 0x00625f04, &vga) || vga == ~0u ||
 	    read_bar(work, 0x001fa7c8, &plm) || plm == ~0u || !(plm & 1) ||
 	    read_bar(work, 0x001fa82c, &lo) || lo == ~0u ||
@@ -1159,16 +1203,16 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 	ret = gpu_unlock_fwsec_patch_frts(image, &fw, frts);
 	if (ret)
 		goto out;
-	if (!fw.ucode_id ||
-	    read_bar(work, 0x008241c0 + (fw.ucode_id - 1) * 4, &fuse_raw)) {
-		ret = -EIO;
-		goto out;
-	}
-	version = gpu_unlock_fuse_version(fuse_raw);
-	dev_info(&work->pdev->dev, "FWSEC fuse: raw=%#x version=%u\n", fuse_raw, version);
-	{
+	if (fw.sig_count > 0) {
 		u32 sig_at = 0;
 
+		if (!fw.ucode_id ||
+		    read_bar(work, 0x008241c0 + (fw.ucode_id - 1) * 4, &fuse_raw)) {
+			ret = -EIO;
+			goto out;
+		}
+		version = gpu_unlock_fuse_version(fuse_raw);
+		dev_info(&work->pdev->dev, "FWSEC fuse: raw=%#x version=%u\n", fuse_raw, version);
 		ret = gpu_unlock_fwsec_sig_offset(fw.sig_versions, version, 384, &sig_at);
 		if (ret)
 			goto out;
@@ -1246,9 +1290,9 @@ static int unlock_transaction_gfw(struct unlock_transaction_work *work)
 		if (!assessed) {
 			u32 ss0, ss1, wpr_hi;
 
-			if (read_bar(work, GU_FEAT_PLM_OFFSET, &work->plm_entry) ||
-			    read_bar(work, GU_FEAT_SS0_OFFSET, &ss0) || ss0 == ~0u ||
-			    read_bar(work, GU_FEAT_SS1_OFFSET, &ss1) || ss1 == ~0u ||
+			if (read_bar(work, feat_plm_offset(work), &work->plm_entry) ||
+			    read_bar(work, feat_ss0_offset(work), &ss0) || ss0 == ~0u ||
+			    read_bar(work, feat_ss1_offset(work), &ss1) || ss1 == ~0u ||
 			    read_bar(work, 0x001fa828, &wpr_hi) || inaccessible(wpr_hi))
 				return GU_RESULT(-ENODEV);
 			dev_info(&work->pdev->dev, "entry: plm=%#x ss0=%#x ss1=%#x wpr2_hi=%#x\n",
@@ -1319,8 +1363,8 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 			required = false;
 	/* These independently readable feature words reject a disconnected or
 	 * protected BAR view even when every sampled PLM happens to be all ones. */
-	state_ret |= read_bar(work, GU_FEAT_SS0_OFFSET, &ss0);
-	state_ret |= read_bar(work, GU_FEAT_SS1_OFFSET, &ss1);
+	state_ret |= read_bar(work, feat_ss0_offset(work), &ss0);
+	state_ret |= read_bar(work, feat_ss1_offset(work), &ss1);
 	if (inaccessible(ss0) || inaccessible(ss1))
 		state_ret = -ENODEV;
 	if (ad102_readout(work, "after-payload", false))
@@ -1419,9 +1463,9 @@ static int unlock_transaction_selector(struct unlock_transaction_work *work)
 
 	if (is_ad102(work) && !work->payload_verified)
 		return GU_RESULT(-EPROTO);
-	ret = write_selector(work, "SS0", GU_FEAT_SS0_OFFSET, GU_SS0_UNLOCK);
+	ret = write_selector(work, "SS0", feat_ss0_offset(work), GU_SS0_UNLOCK);
 	if (!ret)
-		ret = write_selector(work, "SS1", GU_FEAT_SS1_OFFSET, GU_SS1_UNLOCK);
+		ret = write_selector(work, "SS1", feat_ss1_offset(work), GU_SS1_UNLOCK);
 	if (!ret && is_ad102(work))
 		ret = ad102_readout(work, "selectors-applied", true);
 	return GU_RESULT(ret);
@@ -1574,8 +1618,8 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 	/* Both V67 publication and stock-signature restoration must complete. */
 	if (work->signature_calls != 2)
 		return GU_RESULT(-EPROTO);
-	if (read_bar(work, GU_FEAT_SS0_OFFSET, &ss0) || ss0 == ~0u ||
-	    read_bar(work, GU_FEAT_SS1_OFFSET, &ss1) || ss1 == ~0u)
+	if (read_bar(work, feat_ss0_offset(work), &ss0) || ss0 == ~0u ||
+	    read_bar(work, feat_ss1_offset(work), &ss1) || ss1 == ~0u)
 		return GU_RESULT(-ENODEV);
 	dev_info(&work->pdev->dev, "pre-FLR selectors: ss0=%#x expected=%#x ss1=%#x expected=%#x\n",
 		ss0, GU_SS0_UNLOCK, ss1, GU_SS1_UNLOCK);
@@ -1643,9 +1687,9 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 	    !(cpuctl & GU_GFW_CPUCTL_HALTED) ||
 	    read_bar(work, 0x001fa824, &lo) || inaccessible(lo) ||
 	    read_bar(work, 0x001fa828, &hi) || inaccessible(hi) ||
-	    read_bar(work, GU_FEAT_SS0_OFFSET, &ss0) || inaccessible(ss0) ||
-	    read_bar(work, GU_FEAT_SS1_OFFSET, &ss1) || inaccessible(ss1) ||
-	    read_bar(work, GU_FEAT_PLM_OFFSET, &plm) ||
+	    read_bar(work, feat_ss0_offset(work), &ss0) || inaccessible(ss0) ||
+	    read_bar(work, feat_ss1_offset(work), &ss1) || inaccessible(ss1) ||
+	    read_bar(work, feat_plm_offset(work), &plm) ||
 	    (plm & 0xffff0000u) == 0xbadf0000u)
 		return GU_RESULT(-ENODEV);
 	dev_info(&work->pdev->dev,
@@ -1743,3 +1787,8 @@ MODULE_FIRMWARE(BOOT_FILE_GA102);
 MODULE_FIRMWARE(BOOT_FILE_AD102);
 MODULE_FIRMWARE(BOOT_DESC_FILE_GA102);
 MODULE_FIRMWARE(BOOT_DESC_FILE_AD102);
+MODULE_FIRMWARE(BOOTER_FILE_TU102);
+MODULE_FIRMWARE(V67_FILE_TU102);
+MODULE_FIRMWARE(GSP_FILE_TU10X);
+MODULE_FIRMWARE(BOOT_FILE_TU102);
+MODULE_FIRMWARE(BOOT_DESC_FILE_TU102);

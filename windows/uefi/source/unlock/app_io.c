@@ -14,7 +14,15 @@ static EFI_FILE_PROTOCOL *Root,*Parent,*Run,*Report;
 static BOOLEAN LogFault;
 BOOLEAN GuScreenDetached;
 typedef struct {const char *name;CHAR16 *file;UINTN size;const char *hash;} ASSET_SPEC;
-#if !defined(GU_ARCH_ADA) || GU_ARCH_ADA
+#if defined(GU_ARCH_TURING) && GU_ARCH_TURING
+static const ASSET_SPEC Specs[]={
+ {"gpu-unlock/610.43.03/booter_load_tu102.bin",L"ASSETS\\booter_load_tu102.bin",59224,"a5cd2eb6a92f343003eb3da67905318dc24f59f77dc02fb48b6389098fbffdb5"},
+ {"gpu-unlock/610.43.03/v67-tu102-610.43.03.bin",L"ASSETS\\v67-tu102-610.43.03.bin",64000,"54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024"},
+ {"gpu-unlock/610.43.03/gsp_tu10x.bin",L"ASSETS\\gsp_tu10x.bin",46778072,"d9d9e0f23ccaa9f82e6879c97a7fb0962a421f7b713ba9ff2169641d34ef47be"},
+ {"gpu-unlock/610.43.03/gsp_boot_tu102.bin",L"ASSETS\\gsp_boot_tu102.bin",16384,"b2bdccbb79ad4dd48d85c35b00d9ccdf34625bd323805be3f9045a4a24d09fa5"},
+ {"gpu-unlock/610.43.03/gsp_boot_desc_tu102.bin",L"ASSETS\\gsp_boot_desc_tu102.bin",84,"d66ab92e021b08d58045569df6956ef1bc742c57e7b31736b172578df87eb0e8"}
+};
+#elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
 static const ASSET_SPEC Specs[]={
  {"gpu-unlock/610.43.03/booter_load_ad102.bin",L"ASSETS\\booter_load_ad102.bin",57672,"6ee05b20e1dc244c08c052f36ef28469b8d09f4955d1fe33e48a179e11a7fd49"},
  {"gpu-unlock/610.43.03/v67-ad102-610.43.03-four-plm.bin",L"ASSETS\\v67-ad102-610.43.03-four-plm.bin",64000,"44c36b2d6b3424e53e18f3e55db85c833655de071ce66ce42749588a4a7dc8cb"},
@@ -203,10 +211,10 @@ EFI_STATUS GuIoOpen(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
     if(status!=EFI_NOT_FOUND)return status;
     status=Run->Open(Run,&Report,L"REPORT.TXT",EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE|EFI_FILE_MODE_CREATE,0);
     if(EFI_ERROR(status) || !Report)return EFI_DEVICE_ERROR;
-    GuLog("NVIDIA GPU TENSOR UNLOCK / UEFI PRE-BOOT TRANSACTION\nRUN%02u\nRUN_ID=RUN%02u BOARD_ID=%#x SUBSYSTEM=%#x BDF=%u:%u:%u.%u ARCH=%s\nPress U once: one firmware transaction, verified selectors, FLR and Windows handoff. Confirmation mode=%s.\n",
+    GuLog("NVIDIA GPU TENSOR UNLOCK / UEFI PRE-BOOT TRANSACTION\nRUN%02u\nRUN_ID=RUN%02u BOARD_ID=%#x SUBSYSTEM=%#x BDF=%u:%u:%u.%u ARCH=%s\n[STAGE 1/3] PREFLIGHT & ASSET LOADING: verifying VBIOS and reading firmware from USB... Please wait (do NOT press keys yet). Confirmation mode=%s.\n",
       (unsigned)slot,(unsigned)slot,(unsigned)GU_BOARD_ID,(unsigned)GU_BOARD_SUBSYSTEM,
       (unsigned)GU_BOARD_SEGMENT,(unsigned)GU_BOARD_BUS,(unsigned)GU_BOARD_DEVICE,(unsigned)GU_BOARD_FUNCTION,
-      GU_ARCH_ADA?"ADA":"AMPERE",KOH_UNATTENDED_AUTOFIRE?"unattended":"manual");
+      GU_ARCH_TURING?"TURING":(GU_ARCH_ADA?"ADA":"AMPERE"),KOH_UNATTENDED_AUTOFIRE?"unattended":"manual");
     GuLogText("PIO readback is not an execution gate. This path does not independently verify TCM contents; FWSEC scratch/WPR results are required.\n");
     return GuLogReady()?EFI_SUCCESS:EFI_DEVICE_ERROR;
   }
@@ -231,7 +239,15 @@ EFI_STATUS GuSavePromDump(const VOID *Data,UINTN Size) {
   return EFI_ERROR(status)?status:closed;
 }
 EFI_STATUS GuLoadAssets(VOID) {
+  static const char *const load_steps[5]={
+    "[LOADING 1/5] Reading Booter Load ucode from USB...\n",
+    "[LOADING 2/5] Reading V67 SEC2 payload from USB...\n",
+    "[LOADING 3/5] Reading GSP firmware image (46-84 MB, takes 5-15s on USB)...\n",
+    "[LOADING 4/5] Reading GSP RM Boot ucode from USB...\n",
+    "[LOADING 5/5] Reading GSP Boot descriptor from USB...\n"
+  };
   for(UINTN i=0;i<5;i++) {
+    GuConsole(load_steps[i]);
     EFI_FILE_PROTOCOL *file=NULL;const ASSET_SPEC *spec=&Specs[i];
     EFI_STATUS status=Parent->Open(Parent,&file,spec->file,EFI_FILE_MODE_READ,0);
     if(EFI_ERROR(status) || !file)return EFI_NOT_FOUND;

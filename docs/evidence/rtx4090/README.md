@@ -1,6 +1,6 @@
 # RTX 4090 evidence excerpts
 
-These files support the [RTX 4090 experiment report](../../../rtx4090-register-report.md).
+These files support the [RTX 4090 experiment report](../../rtx4090-register-report.md).
 The successful firmware transaction was measured on 2026-10-23, using one
 RTX 4090 and one successful cold power-on. The implementation preceded the
 publication cleanup; the cleaned module needs an independent hardware repeat.
@@ -38,5 +38,6 @@ sha256sum -c SHA256SUMS
 The AD102 payload comes from
 [TOTORONG/AD103_win_unlocker](https://huggingface.co/TOTORONG/AD103_win_unlocker)
 and the Linux loader derives from
-[Zagitta/gpu-unlock](https://github.com/Zagitta/gpu-unlock). See the report and
+[Zagitta/gpu-unlock](https://github.com/Zagitta/gpu-unlock) and
+[elias-gaeros/gpu-unlock](https://github.com/elias-gaeros/gpu-unlock). See the report and
 [firmware notice](../../../firmware/NOTICE.md) for provenance and licensing.

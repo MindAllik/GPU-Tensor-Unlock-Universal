@@ -8,10 +8,7 @@ checks of 65,536 cells for FP16/FP32 and BF16/FP32.
 `sm-rates.json` contains the selected read-only NVIDIA RM getter values; the
 private GPU UUID is omitted. `transaction-excerpt.txt` contains selected
 current-boot kernel messages, with the host name removed. It is an excerpt,
-not a complete kernel log. `mining-recovery-excerpt.txt` contains two fresh
-accepted-share lines and a later 17-accepted, zero-rejected status sample from
-the restored owner miner. The `1/0` accepted line is from its new process after
-the second cold boot; credentials are excluded.
+not a complete kernel log; credentials and host identifiers are excluded.
 
 `cutlass-unlocked-f16.txt` and `cutlass-unlocked-bf16.txt` are complete stdout
 from NVIDIA CUTLASS Profiler 4.8.1, source commit
@@ -61,9 +58,9 @@ lines from two ordinary warm reboots of the same card. The first selected the
 tested Ada image for one boot; the second selected it using a persistent
 systemd-boot default with no one-shot override. Both showed `wpr2_hi=0`
 before the transaction and `gpu_unlock: unlocked` afterward. The file also
-records the second boot's EFI selection, read-only NVIDIA RM full-rate values,
-and a fresh accepted owner-mining share. This is evidence for one host and
-one GPU; a different board may need a full power cut before each attempt.
+records the read-only NVIDIA RM full-rate values after the second boot. This
+is evidence for one host and one GPU; a different board may need a full power
+cut before each attempt.
 
 `tensor-modes-stock.json` and `tensor-modes-unlocked.json` contain the runner's
 matched FP16/FP32 control, TF32/FP32, and unsigned INT4/INT32 instruction
@@ -71,8 +68,7 @@ measurements. Only the private GPU UUID was removed from the runner's GPU
 identity; build and boot metadata were added. The repetition timings, rates,
 launch geometry, expected values, and per-cell mismatch counts are unchanged.
 `tensor-modes-comparison.json` derives the ratios and records the same cubin
-SHA-256 in both states. `tensor-modes-mining-recovery.txt` contains accepted
-`1/0` and `2/0` shares after returning the host to its persistent Ada boot.
+SHA-256 in both states.
 
 The benchmark's [GPL source](../../../diagnostics/bench/tensor_modes_issue.cu)
 SHA-256 is `46cc852ec15ba2d12a259d7698e8fcd2104dfb07a5947a38d46c7bd6b5f5462f`.
