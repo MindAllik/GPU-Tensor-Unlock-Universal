@@ -716,12 +716,14 @@ static int load_booter(struct unlock_transaction_work *work)
 static int patch_booter(struct unlock_transaction_work *work)
 {
 	const u8 *data = work->booter_fw->data;
-	u32 fuse_raw, fuse_ver;
+	u32 fuse_raw = 0, fuse_ver = 0;
 	u32 index = work->booter_hdr.ucode_id - 1;
 
-	if (read_bar(work, GU_FUSE_SEC2_UCODE1 + index * 4, &fuse_raw))
-		return GU_RESULT(-EIO);
-	fuse_ver = gpu_unlock_fuse_version(fuse_raw);
+	if (work->booter_hdr.num_sigs > 1) {
+		if (read_bar(work, GU_FUSE_SEC2_UCODE1 + index * 4, &fuse_raw))
+			return GU_RESULT(-EIO);
+		fuse_ver = gpu_unlock_fuse_version(fuse_raw);
+	}
 	dev_info(&work->pdev->dev, "Booter signature: fuse_raw=%#x version=%u signatures=%u size=%u\n",
 		fuse_raw, fuse_ver, work->booter_hdr.num_sigs, work->booter_hdr.sig_bytes);
 	return GU_RESULT(gpu_unlock_booter_patch(work->booter_cpu, work->booter_image_size,

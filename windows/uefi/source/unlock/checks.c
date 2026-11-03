@@ -5,7 +5,10 @@
 #define GU_CAP_START 0x40U
 #define GU_CAP_LAST 0xfcU
 #define GU_CAP_LIMIT ((GU_CONFIG_BYTES - GU_CAP_START) / 4U)
+#define GU_VPD_ID 0x03U
+#define GU_SUBSYS_CAP_ID 0x0dU
 #define GU_MSIX_ID 0x11U
+#define GU_AF_CAP_ID 0x13U
 
 static UINT8 ConfigByte(const UINT32 Config[64], UINTN Offset) {
   return (UINT8)(Config[Offset / 4U] >> ((Offset & 3U) * 8U));
@@ -28,7 +31,7 @@ BOOLEAN GuCheckConfig(const UINT32 Config[64], UINTN Segment, UINTN Bus,
   *Out = Caps;
   if (Config == NULL || Segment != GU_BOARD_SEGMENT || Bus != GU_BOARD_BUS || Device != GU_BOARD_DEVICE || Function != GU_BOARD_FUNCTION)
     return FALSE;
-  if (Config[0] != GU_BOARD_ID || Config[0x2c / 4] != GU_BOARD_SUBSYSTEM ||
+  if (Config[0] != GU_BOARD_ID || (GU_BOARD_SUBSYSTEM != 0U && Config[0x2c / 4] != GU_BOARD_SUBSYSTEM) ||
       ConfigByte(Config, 0x0b) != PCI_CLASS_DISPLAY ||
       (ConfigByte(Config, PCI_HEADER_TYPE_OFFSET) & 0x7fU) != HEADER_TYPE_DEVICE)
     return FALSE;
@@ -62,6 +65,13 @@ BOOLEAN GuCheckConfig(const UINT32 Config[64], UINTN Segment, UINTN Bus,
           return FALSE;
         Length = 8;
         break;
+      case GU_VPD_ID:
+      case GU_SUBSYS_CAP_ID:
+        Length = 8;
+        break;
+      case GU_AF_CAP_ID:
+        Length = 6;
+        break;
       case EFI_PCI_CAPABILITY_ID_MSI:
         if (Caps.msi != 0 || (Control & 1U) != 0) return FALSE;
         /* Mask-capable layouts include two reserved bytes after Message Data. */
@@ -72,8 +82,16 @@ BOOLEAN GuCheckConfig(const UINT32 Config[64], UINTN Segment, UINTN Bus,
         if (Caps.pcie != 0 || (Control & 0x0fU) < 1 ||
             (Control & 0x0fU) > 2 || ((Control >> 4U) & 0x0fU) > 1)
           return FALSE;
-        /* Endpoint v1 reaches Link Status; reserve the entire v2 layout. */
-        Length = (Control & 0x0fU) == 1 ? 0x14U : 0x3cU;
+        /* Endpoint v1 reaches Link Status (0x14); v2 reaches Device Control 2 (0x2c)
+         * or full v2 layout (0x3c). If Next immediately follows at +0x2c or +0x34,
+         * respect that compact Endpoint layout. */
+        if ((Control & 0x0fU) == 1) {
+          Length = 0x14U;
+        } else if (Next > Pointer && Next < Pointer + 0x3cU && Next >= Pointer + 0x2cU) {
+          Length = Next - Pointer;
+        } else {
+          Length = 0x3cU;
+        }
         break;
       case GU_MSIX_ID:
         if (Caps.msix != 0 || (Control & 0x8000U) != 0) return FALSE;

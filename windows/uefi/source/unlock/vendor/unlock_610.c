@@ -630,12 +630,14 @@ static int load_booter(struct unlock_transaction_work *work)
 static int patch_booter(struct unlock_transaction_work *work)
 {
 	const u8 *data = work->booter_fw->data;
-	u32 fuse_raw, fuse_ver;
+	u32 fuse_raw = 0, fuse_ver = 0;
 	u32 index = work->booter_hdr.ucode_id - 1;
 
-	if (read_bar(work, GU_FUSE_SEC2_UCODE1 + index * 4, &fuse_raw))
-		return GU_RESULT(-EIO);
-	fuse_ver = gpu_unlock_fuse_version(fuse_raw);
+	if (work->booter_hdr.num_sigs > 1) {
+		if (read_bar(work, GU_FUSE_SEC2_UCODE1 + index * 4, &fuse_raw))
+			return GU_RESULT(-EIO);
+		fuse_ver = gpu_unlock_fuse_version(fuse_raw);
+	}
 	dev_info(&work->pdev->dev, "Booter signature: fuse_raw=%#x version=%u signatures=%u size=%u\n",
 		fuse_raw, fuse_ver, work->booter_hdr.num_sigs, work->booter_hdr.sig_bytes);
 	return GU_RESULT(gpu_unlock_booter_patch(work->booter_cpu, work->booter_image_size,
@@ -820,6 +822,8 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 		    inaccessible(cap))
 			return GU_RESULT(-ENODEV);
 		mb = ((cap >> 4) & 63u) << (cap & 15u);
+		if (cap & (1u << 30))
+			mb = (mb / 16u) * 15u;
 	}
 	if (!mb || mb == ~0u ||
 	    read_bar(work, 0x00625f04, &vga) || vga == ~0u ||
@@ -1350,15 +1354,18 @@ static int sec2_prepare_fire(struct unlock_transaction_work *work,
 	return 0;
 }
 
-static int read_target_plm(struct unlock_transaction_work *work, u32 addr, u32 *value)
+static int read_target_plm(struct unlock_transaction_work *work, u32 addr, u32 *value, bool is_required)
 {
 	u32 identity, chip;
 	/* All ones can be a real PLM value. Check independent PCI/BAR identity
-	 * and reject protected-read sentinels instead of rejecting all ones. */
+	 * and reject protected-read sentinels on required targets instead of
+	 * rejecting all ones. Non-required observational targets (such as FBPA
+	 * 0x009a0148 on floor-swept dies or Ampere/Turing) still check BAR
+	 * transport health without failing if the partition returns 0xbadfxxxx. */
 	if (diag_pci_dword(work, false, PCI_VENDOR_ID, &identity) ||
 	    identity != GU_TARGET_PCI_ID || read_bar(work, 0, &chip) ||
 	    !GuValidArchChip(chip) || read_bar(work, addr, value) ||
-	    (*value & 0xffff0000u) == 0xbadf0000u)
+	    (is_required && (*value & 0xffff0000u) == 0xbadf0000u))
 		return GU_RESULT(-ENODEV);
 	return 0;
 }
@@ -1377,7 +1384,7 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
  if (read_bar(work,0x1fa824,&saved_lo) || inaccessible(saved_lo) ||
      read_bar(work,0x1fa828,&saved_hi) || inaccessible(saved_hi)) return GU_RESULT(-EIO);
  for(index=0;index<ARRAY_SIZE(plm_targets);index++) {
-  if(read_target_plm(work,plm_targets[index].addr,&plm))return GU_RESULT(-ENODEV);
+  if(read_target_plm(work,plm_targets[index].addr,&plm,(GU_ARCH_ADA?true:(index==0||index==3))))return GU_RESULT(-ENODEV);
   dev_info(&work->pdev->dev,"AD102 PLM initial: index=%u target=%s value=%#x expected=%#x\n",index,plm_targets[index].name,plm,plm_targets[index].value);
  }
  dev_info(&work->pdev->dev,"AD102 SINGLE FIRE: WPR_CFG->FBPA->WPR->FEAT inside one SEC2 execution; max_starts=1\n");
@@ -1403,7 +1410,7 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
     read_bar(work,SEC2_BASE+0x94,&debug))return GU_RESULT(-ENODEV);
  work->sec2_halt_verified=!inaccessible(cpuctl) && !!(cpuctl&0x10);
  for(index=0;index<ARRAY_SIZE(plm_targets);index++) {
-  if(read_target_plm(work,plm_targets[index].addr,&plm))return GU_RESULT(-ENODEV);
+  if(read_target_plm(work,plm_targets[index].addr,&plm,(GU_ARCH_ADA?true:(index==0||index==3))))return GU_RESULT(-ENODEV);
   dev_info(&work->pdev->dev,"AD102 PLM final: index=%u target=%s value=%#x expected=%#x matched=%u\n",index,plm_targets[index].name,plm,plm_targets[index].value,plm==plm_targets[index].value);
 #if !defined(GU_ARCH_ADA) || GU_ARCH_ADA
   if(plm!=plm_targets[index].value) { all=false; if(index!=1)required=false; }

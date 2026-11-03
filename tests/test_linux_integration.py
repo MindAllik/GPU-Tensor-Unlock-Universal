@@ -256,5 +256,43 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
                 seen_files[low] = rel
 
 
+    def test_rtx4080_and_multigen_efi_profile_verification_and_isolated_build(self) -> None:
+        """Verify that build.py stages --profile-dir headers without shadowing by source/unlock/local_profile.h
+        and that verify_compiled_efi_profile catches any stale/default profile leakage."""
+        rtx4080_cfg = {
+            "gpu_name": "NVIDIA GeForce RTX 4080",
+            "die_name": "AD103",
+            "chip_id_hex": "0x193000a1",
+            "board_id_hex": "0x270410de",
+            "subsystem_id_hex": "0x268819da",
+            "segment_hex": "0x0",
+            "bus_hex": "0x01",
+            "device_hex": "0x0",
+            "function_hex": "0x0",
+            "vram_min_hex": "0x3bf0",
+            "vram_max_hex": "0x4400",
+            "esp_guid": "{c70266a8-85cf-45d9-8d4c-6ba57421f55a}",
+            "esp_part_num": 1,
+        }
+        validated = core_detector.validate_target_profile(rtx4080_cfg)
+        self.assertEqual(validated["board_id"], 0x270410DE)
+        self.assertEqual(validated["subsys_id"], 0x268819DA)
+        self.assertEqual(validated["chip_id"], 0x193000A1)
+
+        import struct
+        good_efi = (
+            b"MZ_FAKE_EFI"
+            + struct.pack("<I", validated["board_id"])
+            + struct.pack("<I", validated["subsys_id"])
+            + core_detector.guid_string_to_packed_bytes(validated["esp_guid"])
+        )
+        core_detector.verify_compiled_efi_profile(good_efi, validated)
+
+        # If default template 0xf2941569 leaks into a non-4070Ti binary, verification must reject it
+        leaked_efi = good_efi + struct.pack("<I", 0xF2941569)
+        with self.assertRaises(RuntimeError):
+            core_detector.verify_compiled_efi_profile(leaked_efi, validated)
+
+
 if __name__ == "__main__":
     unittest.main()

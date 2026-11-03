@@ -255,6 +255,93 @@ def main() -> int:
             check=True,
         )
         print(r_app.stdout.splitlines()[-1])
+
+        # 4. Cross-generation profile & AD103 cold-state (SS0=0, SS1=0) + AIB PCI capability verification
+        probe_c = work / "probe_multi_gen.c"
+        probe_c.write_text("""
+#include "port.h"
+#include "checks.h"
+int puts(const char *s);
+void abort(void);
+#define CHECK_TRUE(cond) do { if (!(cond)) abort(); } while (0)
+
+int main(void) {
+    /* Verify external --profile-dir header overrode default 0x278210de with RTX 4080 0x270410de */
+    CHECK_TRUE(GU_BOARD_ID == 0x270410deU);
+    CHECK_TRUE(GU_BOARD_SUBSYSTEM == 0x268819daU);
+    CHECK_TRUE(GU_BOARD_CHIP == 0x193000a1U);
+
+    /* Verify GuValidArchChip accepts exact chip and same-family steppings (A1/A2) */
+    CHECK_TRUE(GuValidArchChip(0x193000a1U));
+    CHECK_TRUE(GuValidArchChip(0x193001a2U));
+    CHECK_TRUE(!GuValidArchChip(0x172000a1U));
+    CHECK_TRUE(!GuValidArchChip(0xbadf5040U));
+
+    /* Verify GuClassifyColdState accepts AD103 cold state (SS0=0, SS1=0, PLM=0xffffff8f, WPR2_HI=0) */
+    CHECK_TRUE(GuClassifyColdState(0xffffff8fU, 0x0U, 0x0U, 0x0U) == GU_COLD_OK);
+    CHECK_TRUE(GuClassifyColdState(0x0004cb8fU, 0x0U, 0x0U, 0x0U) == GU_COLD_OK);
+    CHECK_TRUE(GuClassifyColdState(0xffffff8fU, 0x31322012U, 0x7U, 0x0U) == GU_COLD_OK);
+    CHECK_TRUE(GuClassifyColdState(0xffffffffU, 0x88888888U, 0x8U, 0x0U) == GU_COLD_ALREADY_MODIFIED);
+    CHECK_TRUE(GuClassifyColdState(0xffffff8fU, 0x88888888U, 0x0U, 0x0U) == GU_COLD_PARTIALLY_MODIFIED);
+    CHECK_TRUE(GuClassifyColdState(0xffffffffU, 0x0U, 0x0U, 0x0U) == GU_COLD_UNKNOWN_PROFILE_STATE);
+
+    /* Verify GuCheckConfig accepts AIB VPD (0x03) and compact PCIe v2 capability layouts */
+    UINT32 cfg[64] = {0};
+    GU_CAPS caps = {0};
+    cfg[0x00 / 4] = 0x270410deU;
+    cfg[0x04 / 4] = 0x00100003U;
+    cfg[0x08 / 4] = 0x030000a1U;
+    cfg[0x0c / 4] = 0x00800010U;
+    cfg[0x2c / 4] = 0x268819daU;
+    cfg[0x34 / 4] = 0x60U;
+    cfg[0x60 / 4] = 0x48036801U; /* PM at 0x60 -> next 0x68 */
+    cfg[0x64 / 4] = 0x00000008U;
+    cfg[0x68 / 4] = 0x00807805U; /* MSI at 0x68 -> next 0x78 */
+    cfg[0x78 / 4] = 0x0012a410U; /* PCIe v2 at 0x78 -> compact next at 0xa4 (+0x2c) */
+    cfg[0x7c / 4] = 0x112c8de1U;
+    cfg[0xa4 / 4] = 0x0000c803U; /* VPD (0x03) at 0xa4 -> next 0xc8 */
+    cfg[0xc8 / 4] = 0x00050011U; /* MSI-X at 0xc8 -> end 0x00 */
+    CHECK_TRUE(GuCheckConfig(cfg, 0, 1, 0, 0, &caps));
+    CHECK_TRUE(caps.pm == 0x60 && caps.msi == 0x68 && caps.pcie == 0x78 && caps.msix == 0xc8);
+
+    puts("Multi-generation RTX 4080 (AD103) profile, cold-state SS0=0/SS1=0, and AIB PCI capability checks PASS");
+    return 0;
+}
+""")
+        prof_4080 = work / "prof_4080"
+        prof_4080.mkdir()
+        (prof_4080 / "local_profile.h").write_text("""#pragma once
+#define GU_BOARD_ID 0x270410deU
+#define GU_BOARD_SUBSYSTEM 0x268819daU
+#define GU_BOARD_CHIP 0x193000a1U
+#define GU_BOARD_SEGMENT 0U
+#define GU_BOARD_BUS 0x01U
+#define GU_BOARD_DEVICE 0U
+#define GU_BOARD_FUNCTION 0U
+#define GU_BOARD_CLASS_REV 0x030000a1U
+#define GU_VRAM_MIN_MIB 0x3bf0U
+#define GU_VRAM_MAX_MIB 0x4400U
+#define GU_ARCH_ADA 1
+#define GU_ARCH_TURING 0
+#define GU_EXPECTED_COLD_PLM 0xffffff8fU
+#define GU_EXPECTED_POST_FLR_PLM 0xffffffffU
+#define KOH_WINDOWS_ESP_GUID 0xc70266a8U,0x85cfU,0x45d9U,{0x8d,0x4c,0x6b,0xa5,0x74,0x21,0xf5,0x5a}
+#define KOH_WINDOWS_ESP_PART 1U
+#define KOH_PAYLOAD_ESP_GUID 0xc70266a9U,0x85cfU,0x45d9U,{0x8d,0x4c,0x6b,0xa5,0x74,0x21,0xf5,0x5a}
+#define KOH_AUTOCONFIRM_MS 30000
+#define KOH_UNATTENDED_AUTOFIRE 0
+""")
+        src_4080 = work / "src_4080"
+        shutil.copytree(src, src_4080)
+        shutil.copy2(prof_4080 / "local_profile.h", src_4080 / "unlock" / "local_profile.h")
+        probe_exe = work / "probe_4080_asan"
+        subprocess.run(
+            ["gcc", f"-I{prof_4080}", *asan_flags, str(probe_c), "unlock/checks.c", "-o", str(probe_exe)],
+            cwd=src_4080,
+            check=True,
+        )
+        r_probe = subprocess.run([str(probe_exe)], cwd=src_4080, capture_output=True, text=True, check=True)
+        print(r_probe.stdout.strip())
         return 0
 
 

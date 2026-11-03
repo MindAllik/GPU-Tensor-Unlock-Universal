@@ -358,6 +358,43 @@ def check_zst_support() -> tuple[bool, str]:
     return False, "missing"
 
 
+def guid_string_to_packed_bytes(guid_str: str) -> bytes:
+    clean = guid_str.strip().strip("{}").replace("-", "")
+    if not re.fullmatch(r"[0-9a-fA-F]{32}", clean):
+        raise ValueError(f"Invalid GUID string: {guid_str}")
+    d1 = int(clean[0:8], 16)
+    d2 = int(clean[8:12], 16)
+    d3 = int(clean[12:16], 16)
+    d4 = [int(clean[16 + 2 * i : 18 + 2 * i], 16) for i in range(8)]
+    return struct.pack("<IHH8B", d1, d2, d3, *d4)
+
+
+def verify_compiled_efi_profile(efi_bytes: bytes, validated: dict[str, Any]) -> None:
+    """Verify that the compiled BOOTX64.EFI binary actually embeds the target board ID,
+    subsystem ID, chip ID, and Windows ESP GUID (preventing any header-shadowing regression)."""
+    board_le = struct.pack("<I", validated['board_id'])
+    if board_le not in efi_bytes:
+        raise RuntimeError(
+            f"Compiled BOOTX64.EFI does not contain target GU_BOARD_ID 0x{validated['board_id']:08x}!"
+        )
+    if validated['subsys_id'] != 0:
+        subsys_le = struct.pack("<I", validated['subsys_id'])
+        if subsys_le not in efi_bytes:
+            raise RuntimeError(
+                f"Compiled BOOTX64.EFI does not contain target GU_BOARD_SUBSYSTEM 0x{validated['subsys_id']:08x}!"
+            )
+    esp_bytes = guid_string_to_packed_bytes(validated['esp_guid'])
+    if esp_bytes not in efi_bytes:
+        raise RuntimeError(
+            f"Compiled BOOTX64.EFI does not contain target KOH_WINDOWS_ESP_GUID {validated['esp_guid']}!"
+        )
+    if (validated['board_id'], validated['subsys_id']) != (0x278210DE, 0xF2941569):
+        if struct.pack("<I", 0xF2941569) in efi_bytes:
+            raise RuntimeError(
+                "Compiled BOOTX64.EFI still contains default template subsystem 0xf2941569!"
+            )
+
+
 def guid_string_to_c_macro(guid_str: str) -> str:
     if not isinstance(guid_str, str):
         raise ValueError("GUID must be a string")
@@ -843,8 +880,8 @@ def _query_nvidia_smi_gpus(raw_csv: str | None = None) -> tuple[str, list[dict[s
             sub32 = int(sub_hex, 16)
             dev16 = (dev32 >> 16) & 0xFFFF
             vram_mib = int(round(float(vram_s)))
-            low = max(1024, (vram_mib - 64) & ~0xF)
-            high = (vram_mib + 64 + 0xF) & ~0xF
+            low = max(1024, (vram_mib - 1024) & ~0xF)
+            high = (vram_mib + 1024 + 0xF) & ~0xF
             drv_ver = dver_s or drv_ver
 
             def _flt(s: str) -> float:
@@ -993,8 +1030,8 @@ def detect_host_environment() -> dict[str, Any]:
                         vram_max_hex = ""
                         if nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(mem)) == 0 and mem.total > 0:
                             vram_mib = int(round(mem.total / (1024 * 1024)))
-                            low = max(1024, (vram_mib - 64) & ~0xF)
-                            high = (vram_mib + 64 + 0xF) & ~0xF
+                            low = max(1024, (vram_mib - 1024) & ~0xF)
+                            high = (vram_mib + 1024 + 0xF) & ~0xF
                             vram_min_hex = f"0x{low:x}"
                             vram_max_hex = f"0x{high:x}"
 
@@ -1157,9 +1194,9 @@ def detect_host_environment() -> dict[str, Any]:
                 "is_ada": cls["is_ada"],
                 "support_tier": cls["support_tier"],
                 "supported": cls["supported"],
-                "vram_mib": 0,
-                "vram_min_hex": "",
-                "vram_max_hex": "",
+                "vram_mib": NOMINAL_VRAM_MIB.get(pg["dev16"], 0),
+                "vram_min_hex": f"0x{max(1024, (NOMINAL_VRAM_MIB.get(pg['dev16'], 0) - 1024) & ~0xF):x}" if NOMINAL_VRAM_MIB.get(pg["dev16"], 0) else "",
+                "vram_max_hex": f"0x{((NOMINAL_VRAM_MIB.get(pg['dev16'], 0) + 1024 + 0xF) & ~0xF):x}" if NOMINAL_VRAM_MIB.get(pg["dev16"], 0) else "",
                 "vbios_version": "N/A",
                 "power_default_w": 0.0,
                 "power_min_w": 0.0,
@@ -1182,8 +1219,8 @@ def detect_host_environment() -> dict[str, Any]:
             if sm_ver:
                 sources.append(f"CUDA ({sm_ver})")
             nom_vram = NOMINAL_VRAM_MIB.get(lg["dev16"], 0)
-            low = max(1024, (nom_vram - 64) & ~0xF) if nom_vram else 0
-            high = ((nom_vram + 64 + 0xF) & ~0xF) if nom_vram else 0
+            low = max(1024, (nom_vram - 1024) & ~0xF) if nom_vram else 0
+            high = ((nom_vram + 1024 + 0xF) & ~0xF) if nom_vram else 0
             info["gpus"].append({
                 "index": idx,
                 "gpu_name": lg["gpu_name"],
@@ -1312,8 +1349,8 @@ def run_live_cli_verification(log_fn: Callable[[str], None] = print) -> dict[str
                     dev16 = (dev32 >> 16) & 0xFFFF
                     cls = classify_pci_device(dev16, name_s)
                     vram_mib = int(float(vram_s))
-                    low = max(1024, (vram_mib - 64) & ~0xF)
-                    high = (vram_mib + 64 + 0xF) & ~0xF
+                    low = max(1024, (vram_mib - 1024) & ~0xF)
+                    high = (vram_mib + 1024 + 0xF) & ~0xF
                     parsed_row = {
                         "index": idx_s,
                         "name": name_s,
@@ -1810,6 +1847,7 @@ def build_and_stage_usb(
         if not built_efi.exists():
             raise RuntimeError("Build succeeded but BOOTX64.EFI was not produced")
         efi_bytes = built_efi.read_bytes()
+        verify_compiled_efi_profile(efi_bytes, validated)
         efi_sha = sha256_bytes(efi_bytes)
 
         CACHE_DIR.mkdir(parents=True, exist_ok=True)

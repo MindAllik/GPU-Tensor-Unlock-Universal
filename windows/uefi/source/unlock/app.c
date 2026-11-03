@@ -140,7 +140,9 @@ static EFI_STATUS ConfigCheck(BOOLEAN Save) {
   BOOLEAN checked=GuCheckConfig(config,segment,bus,device,function,&caps);
   /* Validate discovered BAR/capability layout, then pin the whole snapshot.
    * Firmware-assigned MMIO addresses differ from the reference motherboard. */
-  BOOLEAN valid=checked && config[2]==GU_BOARD_CLASS_REV &&
+  BOOLEAN class_ok=(config[2]==GU_BOARD_CLASS_REV) ||
+    (((config[2]>>24)==0x03U) && ((((config[2]>>16)&0xffU)==0x00U) || (((config[2]>>16)&0xffU)==0x02U)) && ((config[2]&0xf0U)==0xa0U));
+  BOOLEAN valid=checked && class_ok &&
     !(config[4]&1U) && ((config[4]&6U)==0 || (config[4]&6U)==4) &&
     !(config[(caps.pcie+8)/4]&0x00200000U);
   BOOLEAN same=Save || !memcmp(config,InitialConfig,sizeof(config));
@@ -214,17 +216,20 @@ static EFI_STATUS FindTarget(VOID) {
     status=Gu.bs->HandleProtocol(handles[i],&PciGuid,(VOID **)&pci);
     if(!EFI_ERROR(status) && pci)status=pci->Pci.Read(pci,EfiPciIoWidthUint32,0,1,&id);
     if(EFI_ERROR(status) || !pci){GuLog("PCI scan failed: index=%zu status=%#llx\n",(size_t)i,(unsigned long long)status);status=EFI_DEVICE_ERROR;break;}
-    if(id==GU_BOARD_ID) {
-      UINT32 subsys=0;UINTN seg=0,bus=0,dev=0,func=0;
+    if((id&0xffffU)==0x10deU) {
+      UINT32 subsys=0,class_rev=0;UINTN seg=0,bus=0,dev=0,func=0;
       EFI_STATUS ls=pci->GetLocation(pci,&seg,&bus,&dev,&func);
       EFI_STATUS ss=pci->Pci.Read(pci,EfiPciIoWidthUint32,0x2c,1,&subsys);
-      if(EFI_ERROR(ls) || EFI_ERROR(ss)){status=EFI_DEVICE_ERROR;break;}
-      if(seg==GU_BOARD_SEGMENT && bus==GU_BOARD_BUS && dev==GU_BOARD_DEVICE &&
-         func==GU_BOARD_FUNCTION && subsys==GU_BOARD_SUBSYSTEM) {
+      EFI_STATUS cs=pci->Pci.Read(pci,EfiPciIoWidthUint32,0x08,1,&class_rev);
+      if(EFI_ERROR(ls) || EFI_ERROR(ss) || EFI_ERROR(cs)){status=EFI_DEVICE_ERROR;break;}
+      if(id==GU_BOARD_ID && seg==GU_BOARD_SEGMENT && bus==GU_BOARD_BUS && dev==GU_BOARD_DEVICE &&
+         func==GU_BOARD_FUNCTION && (GU_BOARD_SUBSYSTEM==0U || subsys==GU_BOARD_SUBSYSTEM)) {
         found++;Gu.handle=handles[i];Gu.pci=pci;
-      } else {
-        GuLog("PCI non-target candidate skipped: BDF=%zu:%zu:%zu.%zu id=%#x subsys=%#x\n",
-          (size_t)seg,(size_t)bus,(size_t)dev,(size_t)func,id,subsys);
+      } else if((class_rev>>24)==0x03U || id==GU_BOARD_ID) {
+        GuLog("PCI non-target candidate skipped: BDF=%zu:%zu:%zu.%zu id=%#x subsys=%#x (expected BDF=%u:%u:%u.%u id=%#x subsys=%#x)\n",
+          (size_t)seg,(size_t)bus,(size_t)dev,(size_t)func,id,subsys,
+          (unsigned)GU_BOARD_SEGMENT,(unsigned)GU_BOARD_BUS,(unsigned)GU_BOARD_DEVICE,(unsigned)GU_BOARD_FUNCTION,
+          (unsigned)GU_BOARD_ID,(unsigned)GU_BOARD_SUBSYSTEM);
       }
     }
   }
@@ -278,8 +283,10 @@ static EFI_STATUS ColdCheck(VOID) {
   UINT32 vram=GuRead32(0x1183a4);
   if((!vram || GuInaccessible32(vram)) && !Gu.fault) {
     UINT32 cap=GuRead32(GU_TU102_LOCAL_MEM_RANGE_OFFSET);
-    if(!Gu.fault && !GuInaccessible32(cap))
+    if(!Gu.fault && !GuInaccessible32(cap)) {
       vram=((cap>>4)&63U)<<(cap&15U);
+      if(cap&(1U<<30))vram=(vram/16U)*15U;
+    }
   }
   GU_COLD_STATE cold_class=GuClassifyColdState(plm,ss0,ss1,hi);
   GuLog("VRAM register=%#x (%u MiB); accepted=[%#x..%#x] MiB; cold_class=%u; layout uses actual register\n",

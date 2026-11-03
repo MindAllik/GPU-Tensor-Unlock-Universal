@@ -99,23 +99,25 @@ typedef struct {
 extern GU_PLATFORM Gu;
 
 #ifndef GU_ALLOW_ARCH_CHIP_FAMILY
-#define GU_ALLOW_ARCH_CHIP_FAMILY 0
+#define GU_ALLOW_ARCH_CHIP_FAMILY 1
 #endif
 
 static inline BOOLEAN GuValidArchChip(UINT32 Chip) {
+  if (Chip == 0U || (Chip & 0xffff0000U) == 0xbadf0000U || Chip == 0xffffffffU)
+    return FALSE;
   if (Chip == GU_BOARD_CHIP) return TRUE;
 #if GU_ALLOW_ARCH_CHIP_FAMILY
 #if defined(GU_ARCH_TURING) && GU_ARCH_TURING
   UINT32 arch = (Chip >> 20) & 0xfffU;
-  return (Chip & 0xffU) == 0xa1U &&
+  return ((Chip & 0xf0U) == 0xa0U) &&
          (arch == 0x162U || arch == 0x164U || arch == 0x166U);
 #elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
   UINT32 arch = (Chip >> 20) & 0xfffU;
-  return (Chip & 0xffU) == 0xa1U &&
+  return ((Chip & 0xf0U) == 0xa0U) &&
          (arch == 0x192U || arch == 0x193U || arch == 0x194U || arch == 0x196U || arch == 0x197U);
 #else
   UINT32 arch = (Chip >> 20) & 0xfffU;
-  return (Chip & 0xffU) == 0xa1U &&
+  return ((Chip & 0xf0U) == 0xa0U) &&
          (arch == 0x172U || arch == 0x173U || arch == 0x174U || arch == 0x176U || arch == 0x177U);
 #endif
 #else
@@ -129,7 +131,7 @@ static inline BOOLEAN GuInaccessible32(UINT32 V) {
 
 static inline GU_COLD_STATE GuClassifyColdState(UINT32 Plm, UINT32 Ss0, UINT32 Ss1, UINT32 WprHi) {
   if (GuInaccessible32(Ss0) || Ss1 == 0xffffffffU || GuInaccessible32(WprHi) ||
-      (Plm & 0xffff0000U) == 0xbadf0000U) {
+      (Plm & 0xffff0000U) == 0xbadf0000U || Plm == 0U) {
     return GU_COLD_UNREADABLE;
   }
   if ((WprHi >> 4) != 0U) {
@@ -143,7 +145,12 @@ static inline GU_COLD_STATE GuClassifyColdState(UINT32 Plm, UINT32 Ss0, UINT32 S
   if (ss0_unlocked || ss1_unlocked || (Ss0 & 0x88888888U) != 0U || (Ss1 & ~7U) != 0U) {
     return GU_COLD_PARTIALLY_MODIFIED;
   }
-  if (Plm != GU_EXPECTED_COLD_PLM || (Ss1 & 7U) == 0U) {
+  /* On AD103 (e.g. RTX 4080 / 4070 Ti SUPER) and some Turing/Ampere boards,
+   * cold SS0 and SS1 read as 0x0 before any override is written, while on
+   * AD102/AD104/GA102 SS1 reads as 0x7 or 0x2. Accept any un-overridden cold
+   * SS1 (0..7) as long as FEAT_OVR_PLM has the closed cold L3-only permission
+   * byte (0x8f). */
+  if (Plm != GU_EXPECTED_COLD_PLM && (Plm & 0xffU) != (GU_EXPECTED_COLD_PLM & 0xffU)) {
     return GU_COLD_UNKNOWN_PROFILE_STATE;
   }
   return GU_COLD_OK;
