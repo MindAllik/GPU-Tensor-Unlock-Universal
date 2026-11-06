@@ -294,5 +294,99 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
             core_detector.verify_compiled_efi_profile(leaked_efi, validated)
 
 
+
+    def test_usb_drive_detection_win32_and_powershell_fallbacks(self) -> None:
+        """Verify multi-layered USB drive detection handles numeric enums, non-admin empty BusType,
+        Superfloppy FAT32 sticks, Fixed USB 3.x RMB=0 sticks, and Win32 IOCTL_STORAGE_QUERY_PROPERTY."""
+        self.assertEqual(core_detector._normalize_bus_type(7), "USB")
+        self.assertEqual(core_detector._normalize_bus_type("7"), "USB")
+        self.assertEqual(core_detector._normalize_bus_type(12), "SD")
+        self.assertEqual(core_detector._normalize_bus_type(13), "MMC")
+        self.assertEqual(core_detector._normalize_drive_type(2), "Removable")
+        self.assertEqual(core_detector._normalize_drive_type(3), "Fixed")
+        self.assertEqual(core_detector._normalize_filesystem("FAT32 "), ("FAT32", True))
+        self.assertEqual(core_detector._normalize_filesystem("FAT"), ("FAT", True))
+        self.assertEqual(core_detector._normalize_filesystem("exFAT"), ("EXFAT", False))
+
+        import json
+        from unittest import mock
+        fake_ps_json = json.dumps([
+            {
+                "DriveLetter": "D",
+                "Label": "KINGSTON_32",
+                "FileSystem": "FAT32",
+                "DriveType": 3,   # Fixed (RMB=0 modern USB 3.2 stick)
+                "Size": 32 * (1024 ** 3),
+                "UniqueId": "USB-D",
+                "BusType": 7,     # Numeric enum 7 = USB
+                "IsBoot": False,
+                "IsSystem": False,
+                "DiskNumber": 2,
+            },
+            {
+                "DriveLetter": "E",
+                "Label": "",
+                "FileSystem": "FAT32",
+                "DriveType": "Fixed",
+                "Size": 16 * (1024 ** 3),
+                "UniqueId": "SUPERFLOPPY-E",
+                "BusType": "",    # Get-Partition / Get-Disk returned null (non-admin or Superfloppy)
+                "IsBoot": False,
+                "IsSystem": False,
+                "DiskNumber": -1,
+            },
+            {
+                "DriveLetter": "F",
+                "Label": "SANDISK_64",
+                "FileSystem": "exFAT",
+                "DriveType": 2,   # Numeric enum 2 = Removable
+                "Size": 64 * (1024 ** 3),
+                "UniqueId": "USB-F",
+                "BusType": "",
+                "IsBoot": False,
+                "IsSystem": False,
+                "DiskNumber": 3,
+            },
+            {
+                "DriveLetter": "G",
+                "Label": "INTERNAL_DATA",
+                "FileSystem": "NTFS",
+                "DriveType": 3,
+                "Size": 1000 * (1024 ** 3),
+                "UniqueId": "SATA-G",
+                "BusType": 11,    # Numeric 11 = SATA
+                "IsBoot": False,
+                "IsSystem": False,
+                "DiskNumber": 1,
+            },
+        ])
+
+        class FakeProc:
+            returncode = 0
+            stdout = fake_ps_json
+            stderr = ""
+
+        with mock.patch.object(core_detector.subprocess, "run", return_value=FakeProc()):
+            ps_drives = core_detector._list_usb_drives_powershell()
+
+        letters = [d["letter"] for d in ps_drives]
+        self.assertEqual(letters, ["D:\\", "E:\\", "F:\\"])
+        self.assertTrue(ps_drives[0]["is_fat32"])
+        self.assertEqual(ps_drives[0]["bus_type"], "USB")
+        self.assertTrue(ps_drives[1]["is_fat32"])
+        self.assertFalse(ps_drives[2]["is_fat32"])
+        self.assertIn("EXFAT - NEED FAT32", ps_drives[2]["display"])
+
+    def test_ui_dark_scrollbar_and_deps_localization_refresh(self) -> None:
+        """Verify both Windows and Linux UIs use dark-styled ttk.Scrollbar (no white tk.Scrollbar)
+        and refresh [02] dependency status labels immediately when switching languages."""
+        for fname in ("gpu_unlock_ui.py", "linux_unlock_ui.py"):
+            src = (ROOT / fname).read_text(encoding="utf-8")
+            self.assertIsNone(re.search(r"\btk\.Scrollbar\(", src), f"{fname} must not use native white tk.Scrollbar")
+            self.assertIn('style="Console.Vertical.TScrollbar"', src, f"{fname} must use dark Console.Vertical.TScrollbar")
+            self.assertIn("def _refresh_deps_labels(self) -> None:", src, f"{fname} must define _refresh_deps_labels")
+            self.assertIn("self._refresh_deps_labels()", src, f"{fname} must call _refresh_deps_labels on language switch")
+
+
 if __name__ == "__main__":
     unittest.main()

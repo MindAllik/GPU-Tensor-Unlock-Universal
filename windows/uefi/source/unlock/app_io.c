@@ -4,11 +4,13 @@
 #include "format.h"
 #include "local_profile.h"
 #include "sha256.h"
+#include <Protocol/BlockIo.h>
 #include <Protocol/LoadedImage.h>
 #include <Protocol/SimpleFileSystem.h>
 #include <Guid/FileInfo.h>
 static EFI_GUID LoadedGuid=EFI_LOADED_IMAGE_PROTOCOL_GUID,PathGuid=EFI_DEVICE_PATH_PROTOCOL_GUID,
-  FsGuid=EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,InfoGuid=EFI_FILE_INFO_ID;
+  FsGuid=EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,InfoGuid=EFI_FILE_INFO_ID,
+  BlockIoGuid=EFI_BLOCK_IO_PROTOCOL_GUID;
 static EFI_SYSTEM_TABLE *Table;
 static EFI_FILE_PROTOCOL *Root,*Parent,*Run,*Report;
 static BOOLEAN LogFault;
@@ -67,12 +69,21 @@ static BOOLEAN UsbPath(EFI_HANDLE Handle) {
   EFI_DEVICE_PATH_PROTOCOL *path=NULL;
   if(EFI_ERROR(Table->BootServices->HandleProtocol(Handle,&PathGuid,(VOID **)&path)) || !path)return FALSE;
   UINTN total=0;BOOLEAN usb=FALSE;
+  EFI_BLOCK_IO_PROTOCOL *bio=NULL;
+  if(!EFI_ERROR(Table->BootServices->HandleProtocol(Handle,&BlockIoGuid,(VOID **)&bio)) &&
+    bio && bio->Media && bio->Media->RemovableMedia)usb=TRUE;
   for(UINTN nodes=0;nodes<64 && total+4<=4096;nodes++) {
     UINTN n=path->Length[0]+((UINTN)path->Length[1]<<8);
     if(n<4 || n>4096-total)return FALSE;
     if(path->Type==MESSAGING_DEVICE_PATH &&
       ((path->SubType==MSG_USB_DP && n==sizeof(USB_DEVICE_PATH)) ||
-       (path->SubType==MSG_SD_DP && n==sizeof(SD_DEVICE_PATH))))usb=TRUE;
+       (path->SubType==MSG_USB_CLASS_DP && n==sizeof(USB_CLASS_DEVICE_PATH)) ||
+       (path->SubType==MSG_USB_WWID_DP && n>=sizeof(USB_WWID_DEVICE_PATH)) ||
+       (path->SubType==MSG_SD_DP && n==sizeof(SD_DEVICE_PATH)) ||
+       (path->SubType==MSG_EMMC_DP && n==sizeof(EMMC_DEVICE_PATH)) ||
+       (path->SubType==MSG_UFS_DP && n==sizeof(UFS_DEVICE_PATH))))usb=TRUE;
+    if(path->Type==BBS_DEVICE_PATH && path->SubType==BBS_BBS_DP &&
+      n>=sizeof(BBS_BBS_DEVICE_PATH) && ((BBS_BBS_DEVICE_PATH *)path)->DeviceType==BBS_TYPE_USB)usb=TRUE;
     if(path->Type==END_DEVICE_PATH_TYPE)return usb && n==4 && path->SubType==END_ENTIRE_DEVICE_PATH_SUBTYPE;
     total+=n;path=(VOID *)((UINT8 *)path+n);
   }

@@ -165,6 +165,26 @@ class LinuxUnlockApp(tk.Tk):
             arrowcolor=[("readonly", FG_CYAN), ("disabled", FG_MUTED), ("!disabled", FG_CYAN)],
         )
 
+        style.configure(
+            "Console.Vertical.TScrollbar",
+            background=BTN_ACCENT,
+            troughcolor=BG_PANEL,
+            bordercolor=BORDER_COL,
+            lightcolor=BTN_ACCENT,
+            darkcolor=BTN_ACCENT,
+            arrowcolor=FG_MUTED,
+            gripcount=0,
+            relief="flat",
+            borderwidth=1,
+            width=14,
+        )
+        style.map(
+            "Console.Vertical.TScrollbar",
+            background=[("pressed", "#555555"), ("active", "#4a4a4a"), ("!disabled", BTN_ACCENT), ("disabled", BG_PANEL)],
+            arrowcolor=[("pressed", "#ffffff"), ("active", FG_PRIMARY), ("!disabled", FG_MUTED), ("disabled", BG_PANEL)],
+            troughcolor=[("!disabled", BG_PANEL), ("disabled", BG_PANEL)],
+        )
+
     def _make_panel(self, parent: tk.Widget) -> tuple[tk.Frame, tk.Label]:
         outer = tk.Frame(parent, bg=BG_PANEL, highlightbackground=BORDER_COL, highlightthickness=1, padx=10, pady=8)
         hdr = tk.Label(outer, text="", bg=BG_PANEL, fg=FG_CYAN, font=("Consolas", 10, "bold"), anchor="w")
@@ -478,7 +498,7 @@ class LinuxUnlockApp(tk.Tk):
             wrap="none",
             exportselection=True,
         )
-        sb_y = tk.Scrollbar(log_frame, orient="vertical", command=self.txt_log.yview)
+        sb_y = ttk.Scrollbar(log_frame, orient="vertical", command=self.txt_log.yview, style="Console.Vertical.TScrollbar")
         self.txt_log.configure(yscrollcommand=sb_y.set)
         sb_y.pack(side="right", fill="y")
         self.txt_log.pack(side="left", fill="both", expand=True, padx=6, pady=4)
@@ -549,6 +569,28 @@ class LinuxUnlockApp(tk.Tk):
         self.tree_bench.heading("current", text=t["col_current"])
         self.tree_bench.heading("gain", text=t["col_gain"])
         self._refresh_install_state_labels()
+        self._refresh_deps_labels()
+
+    def _refresh_deps_labels(self) -> None:
+        if not self.hw_info:
+            return
+        t = I18N_LINUX[self.lang]
+        info = self.hw_info
+        hdr_ok = bool(info.get("headers_ok"))
+        self.lbl_headers_val.configure(
+            text=f"{t['status_ok']} ({info.get('headers_path')})" if hdr_ok else f"{t['status_missing']} ({info.get('headers_path')})",
+            fg=FG_GREEN if hdr_ok else FG_AMBER,
+        )
+        dkms_ok = bool(info.get("dkms_toolchain_ok"))
+        self.lbl_dkms_val.configure(
+            text=f"{t['status_ok']} (dkms + {info.get('cc_path')})" if dkms_ok else t["status_missing"],
+            fg=FG_GREEN if dkms_ok else FG_AMBER,
+        )
+        zst_ok = bool(info.get("zst_ok"))
+        self.lbl_initramfs_val.configure(
+            text=f"{t['status_ok']} ({info.get('zst_method')})" if zst_ok else t["status_missing"],
+            fg=FG_GREEN if zst_ok else FG_AMBER,
+        )
 
     def log(self, msg: str) -> None:
         def _append() -> None:
@@ -704,22 +746,7 @@ class LinuxUnlockApp(tk.Tk):
                     self._refresh_install_state_labels()
                     self._refresh_benchmark_table()
 
-                    t = I18N_LINUX[self.lang]
-                    hdr_ok = bool(info.get("headers_ok"))
-                    self.lbl_headers_val.configure(
-                        text=f"{t['status_ok']} ({info.get('headers_path')})" if hdr_ok else f"{t['status_missing']} ({info.get('headers_path')})",
-                        fg=FG_GREEN if hdr_ok else FG_AMBER,
-                    )
-                    dkms_ok = bool(info.get("dkms_toolchain_ok"))
-                    self.lbl_dkms_val.configure(
-                        text=f"{t['status_ok']} (dkms + {info.get('cc_path')})" if dkms_ok else t["status_missing"],
-                        fg=FG_GREEN if dkms_ok else FG_AMBER,
-                    )
-                    zst_ok = bool(info.get("zst_ok"))
-                    self.lbl_initramfs_val.configure(
-                        text=f"{t['status_ok']} ({info.get('zst_method')})" if zst_ok else t["status_missing"],
-                        fg=FG_GREEN if zst_ok else FG_AMBER,
-                    )
+                    self._refresh_deps_labels()
 
                     if info.get("gpu_detected"):
                         self.log(

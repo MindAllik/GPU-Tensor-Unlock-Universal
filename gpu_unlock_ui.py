@@ -151,6 +151,26 @@ class UniversalUnlockApp(tk.Tk):
             arrowcolor=[("readonly", FG_CYAN), ("disabled", FG_MUTED), ("!disabled", FG_CYAN)],
         )
 
+        style.configure(
+            "Console.Vertical.TScrollbar",
+            background=BTN_ACCENT,
+            troughcolor=BG_PANEL,
+            bordercolor=BORDER_COL,
+            lightcolor=BTN_ACCENT,
+            darkcolor=BTN_ACCENT,
+            arrowcolor=FG_MUTED,
+            gripcount=0,
+            relief="flat",
+            borderwidth=1,
+            width=14,
+        )
+        style.map(
+            "Console.Vertical.TScrollbar",
+            background=[("pressed", "#555555"), ("active", "#4a4a4a"), ("!disabled", BTN_ACCENT), ("disabled", BG_PANEL)],
+            arrowcolor=[("pressed", "#ffffff"), ("active", FG_PRIMARY), ("!disabled", FG_MUTED), ("disabled", BG_PANEL)],
+            troughcolor=[("!disabled", BG_PANEL), ("disabled", BG_PANEL)],
+        )
+
     def _make_panel(self, parent: tk.Widget) -> tuple[tk.Frame, tk.Label]:
         outer = tk.Frame(parent, bg=BG_PANEL, highlightbackground=BORDER_COL, highlightthickness=1, padx=10, pady=8)
         hdr = tk.Label(outer, text="", bg=BG_PANEL, fg=FG_CYAN, font=("Consolas", 10, "bold"), anchor="w")
@@ -471,7 +491,7 @@ class UniversalUnlockApp(tk.Tk):
             wrap="none",
             exportselection=True,
         )
-        sb_y = tk.Scrollbar(log_frame, orient="vertical", command=self.txt_log.yview)
+        sb_y = ttk.Scrollbar(log_frame, orient="vertical", command=self.txt_log.yview, style="Console.Vertical.TScrollbar")
         self.txt_log.configure(yscrollcommand=sb_y.set)
         sb_y.pack(side="right", fill="y")
         self.txt_log.pack(side="left", fill="both", expand=True, padx=6, pady=4)
@@ -542,6 +562,23 @@ class UniversalUnlockApp(tk.Tk):
         self.tree_bench.heading("after", text=t["col_after"])
         self.tree_bench.heading("current", text=t["col_current"])
         self.tree_bench.heading("gain", text=t["col_gain"])
+        self._refresh_deps_labels()
+
+    def _refresh_deps_labels(self) -> None:
+        if not self.hw_info:
+            return
+        t = I18N[self.lang]
+        info = self.hw_info
+        llvm_ok = bool(info.get("clang_path") and info.get("lld_path"))
+        self.lbl_llvm_val.configure(
+            text=f"{t['status_ok']} ({Path(info['clang_path']).parent})" if llvm_ok else t["status_missing"],
+            fg=FG_GREEN if llvm_ok else FG_AMBER,
+        )
+        zst_ok = bool(info.get("zst_ok"))
+        self.lbl_zst_val.configure(
+            text=f"{t['status_ok']} ({info.get('zst_method')})" if zst_ok else t["status_missing"],
+            fg=FG_GREEN if zst_ok else FG_AMBER,
+        )
 
     def log(self, msg: str) -> None:
         def _append() -> None:
@@ -701,17 +738,7 @@ class UniversalUnlockApp(tk.Tk):
                     self._on_die_changed()
                     self._refresh_benchmark_table()
 
-                    t = I18N[self.lang]
-                    llvm_ok = bool(info["clang_path"] and info["lld_path"])
-                    self.lbl_llvm_val.configure(
-                        text=f"{t['status_ok']} ({Path(info['clang_path']).parent})" if llvm_ok else t["status_missing"],
-                        fg=FG_GREEN if llvm_ok else FG_AMBER,
-                    )
-                    zst_ok = bool(info["zst_ok"])
-                    self.lbl_zst_val.configure(
-                        text=f"{t['status_ok']} ({info['zst_method']})" if zst_ok else t["status_missing"],
-                        fg=FG_GREEN if zst_ok else FG_AMBER,
-                    )
+                    self._refresh_deps_labels()
 
                     if self.usb_drives:
                         values = [d["display"] for d in self.usb_drives]
@@ -755,9 +782,15 @@ class UniversalUnlockApp(tk.Tk):
                         values = [d["display"] for d in self.usb_drives]
                         self.cb_usb["values"] = values
                         self.var_usb_target.set(values[0])
+                        summary = ", ".join(f"{d['letter']} ({d['filesystem']}, {d['size_gb']} GB)" for d in self.usb_drives)
+                        self.log(f"[USB] Detected {len(self.usb_drives)} USB/removable drive(s): {summary}")
+                        for d in self.usb_drives:
+                            if not d.get("is_fat32"):
+                                self.log(f"[WARN] USB drive {d['letter']} is formatted as {d['filesystem']} — format it as FAT32 before building.")
                     else:
                         self.cb_usb["values"] = []
                         self.var_usb_target.set("")
+                        self.log("[WARN] No removable USB / FAT32 drives detected. Connect a FAT32 USB flash drive with a drive letter (e.g. D:\\) and click REFRESH DRIVES.")
                 finally:
                     self._set_busy(False)
 

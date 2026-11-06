@@ -1402,64 +1402,425 @@ def run_live_cli_verification(log_fn: Callable[[str], None] = print) -> dict[str
     return {"command": smi_cmd_str, "raw_smi": raw_smi, "raw_ps": raw_ps, "gpus": parsed_gpus}
 
 
-def list_usb_drives() -> list[dict[str, Any]]:
-    """Enumerate verified removable USB / SD FAT32 drives on Windows 10/11."""
+_STORAGE_BUS_TYPE_MAP: dict[str, str] = {
+    "1": "SCSI",
+    "2": "ATAPI",
+    "3": "ATA",
+    "7": "USB",
+    "8": "RAID",
+    "11": "SATA",
+    "12": "SD",
+    "13": "MMC",
+    "14": "VIRTUAL",
+    "15": "FILEBACKEDVIRTUAL",
+    "16": "SPACES",
+    "17": "NVME",
+    "BUSTYPEUSB": "USB",
+    "BUSTYPESD": "SD",
+    "BUSTYPEMMC": "MMC",
+    "USB": "USB",
+    "SD": "SD",
+    "MMC": "MMC",
+}
+
+_FAT_FILESYSTEMS: set[str] = {"FAT32", "FAT", "FAT16", "FAT12", "VFAT"}
+
+
+def _normalize_bus_type(raw_bus: Any) -> str:
+    if raw_bus is None:
+        return ""
+    s = str(raw_bus).strip().upper()
+    return _STORAGE_BUS_TYPE_MAP.get(s, s)
+
+
+def _normalize_drive_type(raw_dt: Any) -> str:
+    if raw_dt is None:
+        return ""
+    s = str(raw_dt).strip().upper()
+    if s in ("2", "REMOVABLE", "REMOVABLE DISK", "REMOVABLE MEDIA"):
+        return "Removable"
+    if s in ("3", "FIXED", "LOCAL DISK", "FIXED DISK"):
+        return "Fixed"
+    return str(raw_dt).strip()
+
+
+def _normalize_filesystem(raw_fs: Any) -> tuple[str, bool]:
+    fs = str(raw_fs or "").strip().upper() or "RAW"
+    return fs, (fs in _FAT_FILESYSTEMS)
+
+
+def _format_usb_drive_entry(
+    dl: str,
+    label: str,
+    fs: str,
+    dtype: str,
+    bus_type: str,
+    size_gb: float,
+    unique_id: str = "",
+    disk_number: int = -1,
+) -> dict[str, Any]:
+    norm_fs, is_fat32 = _normalize_filesystem(fs)
+    clean_label = (label or "").strip() or "USB_DRIVE"
+    tag = bus_type or dtype or "USB"
+    fs_badge = norm_fs if is_fat32 else f"{norm_fs} - NEED FAT32"
+    return {
+        "letter": f"{dl}:\\",
+        "label": clean_label,
+        "filesystem": norm_fs,
+        "drive_type": dtype or "Removable",
+        "bus_type": bus_type,
+        "unique_id": unique_id,
+        "disk_number": disk_number,
+        "size_gb": size_gb,
+        "is_fat32": is_fat32,
+        "display": f"{dl}:\\ [{clean_label} | {fs_badge} | {size_gb} GB | {tag}]",
+    }
+
+
+def _is_windows_system_or_esp_root(root_path: Path) -> bool:
+    """Return True if root_path contains a Windows installation or the Windows EFI Boot Manager."""
+    try:
+        if (root_path / "Windows" / "System32").exists():
+            return True
+        if (root_path / "EFI" / "Microsoft" / "Boot" / "bootmgfw.efi").exists():
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _extract_c_string(buf: bytes, offset: int) -> str:
+    if offset <= 0 or offset >= len(buf):
+        return ""
+    end = buf.find(b"\x00", offset)
+    raw = buf[offset:] if end < 0 else buf[offset:end]
+    return raw.decode("ascii", errors="ignore").strip()
+
+
+def _query_win32_device_storage_info(device_path: str, kernel32: Any) -> dict[str, Any]:
+    """Query STORAGE_DEVICE_NUMBER and STORAGE_DEVICE_DESCRIPTOR via DeviceIoControl with dwDesiredAccess=0 (no Admin needed)."""
+    info: dict[str, Any] = {
+        "disk_number": -1,
+        "partition_number": -1,
+        "removable_media": False,
+        "bus_type": "",
+        "hw_model": "",
+    }
+    FILE_SHARE_RW = 0x00000001 | 0x00000002
+    OPEN_EXISTING = 3
+    IOCTL_STORAGE_GET_DEVICE_NUMBER = 0x002D1080
+    IOCTL_STORAGE_QUERY_PROPERTY = 0x002D1400
+
+    handle = kernel32.CreateFileW(
+        ctypes.c_wchar_p(device_path),
+        0,  # dwDesiredAccess = 0 works without Administrator rights
+        FILE_SHARE_RW,
+        None,
+        OPEN_EXISTING,
+        0,
+        None,
+    )
+    if handle in (-1, 0, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
+        return info
+    try:
+        num_buf = ctypes.create_string_buffer(16)
+        bytes_ret = ctypes.c_uint32(0)
+        ok_num = kernel32.DeviceIoControl(
+            handle,
+            IOCTL_STORAGE_GET_DEVICE_NUMBER,
+            None,
+            0,
+            num_buf,
+            ctypes.sizeof(num_buf),
+            ctypes.byref(bytes_ret),
+            None,
+        )
+        if ok_num and bytes_ret.value >= 12:
+            _dev_type, disk_num, part_num = struct.unpack_from("<III", num_buf.raw, 0)
+            if disk_num != 0xFFFFFFFF:
+                info["disk_number"] = int(disk_num)
+            if part_num != 0xFFFFFFFF:
+                info["partition_number"] = int(part_num)
+
+        query_in = ctypes.create_string_buffer(struct.pack("<II4B", 0, 0, 0, 0, 0, 0), 12)
+        desc_buf = ctypes.create_string_buffer(1024)
+        bytes_ret = ctypes.c_uint32(0)
+        ok_prop = kernel32.DeviceIoControl(
+            handle,
+            IOCTL_STORAGE_QUERY_PROPERTY,
+            query_in,
+            12,
+            desc_buf,
+            ctypes.sizeof(desc_buf),
+            ctypes.byref(bytes_ret),
+            None,
+        )
+        if ok_prop and bytes_ret.value >= 32:
+            raw = desc_buf.raw[: bytes_ret.value]
+            info["removable_media"] = bool(raw[10])
+            vendor_off, prod_off, _rev_off, _ser_off, bus_code = struct.unpack_from("<IIIII", raw, 12)
+            info["bus_type"] = _normalize_bus_type(bus_code)
+            vendor = _extract_c_string(raw, vendor_off)
+            product = _extract_c_string(raw, prod_off)
+            hw_model = f"{vendor} {product}".strip()
+            if hw_model:
+                info["hw_model"] = hw_model
+    except Exception:
+        pass
+    finally:
+        try:
+            kernel32.CloseHandle(handle)
+        except Exception:
+            pass
+    return info
+
+
+def _list_usb_drives_win32() -> tuple[list[dict[str, Any]], bool]:
+    """Fast (<1ms), zero-PowerShell, zero-Admin Win32 API enumeration of removable / USB / SD / FAT32 volumes.
+    Returns (drives, needs_ps_fallback)."""
     drives: list[dict[str, Any]] = []
-    if not sys.platform.startswith("win"):
-        return drives
+    needs_ps_fallback = False
+    windll = getattr(ctypes, "windll", None)
+    if windll is None or not hasattr(windll, "kernel32"):
+        return drives, True
+
+    kernel32 = windll.kernel32
+    try:
+        old_err_mode = kernel32.SetErrorMode(0x0001 | 0x8000)
+    except Exception:
+        old_err_mode = 0
+
+    try:
+        bitmask = int(kernel32.GetLogicalDrives())
+        if bitmask <= 0:
+            return drives, True
+
+        sys_drive = os.environ.get("SystemDrive", "C:").rstrip("\\/:").upper() or "C"
+        c_info = _query_win32_device_storage_info(f"\\\\.\\{sys_drive}:", kernel32)
+        boot_disk_num = c_info.get("disk_number", -1)
+
+        for i in range(26):
+            if not (bitmask & (1 << i)):
+                continue
+            dl = chr(ord("A") + i)
+            if dl in ("C", sys_drive):
+                continue
+            root_w = f"{dl}:\\"
+            dt_code = int(kernel32.GetDriveTypeW(ctypes.c_wchar_p(root_w)))
+            # 2 = DRIVE_REMOVABLE, 3 = DRIVE_FIXED
+            if dt_code not in (2, 3):
+                continue
+
+            st_info = _query_win32_device_storage_info(f"\\\\.\\{dl}:", kernel32)
+            disk_num = st_info.get("disk_number", -1)
+            bus_type = st_info.get("bus_type", "")
+            removable_media = bool(st_info.get("removable_media", False))
+
+            if not bus_type and disk_num >= 0:
+                phys_info = _query_win32_device_storage_info(f"\\\\.\\PhysicalDrive{disk_num}", kernel32)
+                bus_type = phys_info.get("bus_type", "")
+                removable_media = removable_media or bool(phys_info.get("removable_media", False))
+                if not st_info.get("hw_model") and phys_info.get("hw_model"):
+                    st_info["hw_model"] = phys_info["hw_model"]
+
+            # Skip legacy A:/B: floppy controllers unless backed by USB/SD/MMC bus
+            if dl in ("A", "B") and bus_type not in ("USB", "SD", "MMC"):
+                continue
+
+            dtype = "Removable" if (dt_code == 2 or removable_media) else "Fixed"
+
+            vol_buf = ctypes.create_unicode_buffer(261)
+            fs_buf = ctypes.create_unicode_buffer(261)
+            serial = ctypes.c_uint32(0)
+            max_comp = ctypes.c_uint32(0)
+            fs_flags = ctypes.c_uint32(0)
+            vol_ok = bool(
+                kernel32.GetVolumeInformationW(
+                    ctypes.c_wchar_p(root_w),
+                    vol_buf,
+                    261,
+                    ctypes.byref(serial),
+                    ctypes.byref(max_comp),
+                    ctypes.byref(fs_flags),
+                    fs_buf,
+                    261,
+                )
+            )
+            total_bytes = ctypes.c_ulonglong(0)
+            space_ok = bool(
+                kernel32.GetDiskFreeSpaceExW(
+                    ctypes.c_wchar_p(root_w),
+                    None,
+                    ctypes.byref(total_bytes),
+                    None,
+                )
+            )
+            if not vol_ok and not space_ok:
+                # Empty multi-slot USB card reader drive letter with no media inserted
+                continue
+
+            fs_raw = fs_buf.value if vol_ok else "RAW"
+            norm_fs, is_fat32 = _normalize_filesystem(fs_raw)
+            size_gb = round(total_bytes.value / (1024**3), 1) if space_ok else 0.0
+
+            is_usb_bus = bus_type in ("USB", "SD", "MMC")
+            is_removable = dtype == "Removable"
+
+            # Exclude internal boot disk partitions unless explicitly removable or on USB/SD/MMC bus
+            if disk_num >= 0 and disk_num == boot_disk_num and not (is_usb_bus or is_removable):
+                continue
+
+            root_path = Path(root_w)
+            if _is_windows_system_or_esp_root(root_path):
+                continue
+
+            # Accept if:
+            # 1) Removable drive (GetDriveTypeW == DRIVE_REMOVABLE or STORAGE_DEVICE_DESCRIPTOR.RemovableMedia), OR
+            # 2) USB / SD / MMC bus via IOCTL_STORAGE_QUERY_PROPERTY, OR
+            # 3) Non-system, non-ESP mounted FAT32 volume (covers UASP / USB-to-NVMe / USB-to-SCSI bridge sticks)
+            if not (is_removable or is_usb_bus or is_fat32):
+                if dt_code == 3 and not bus_type:
+                    needs_ps_fallback = True
+                continue
+
+            effective_bus = bus_type if bus_type else ("USB" if (is_removable or is_fat32) else "")
+            label = (vol_buf.value.strip() if vol_ok else "") or st_info.get("hw_model") or "USB_DRIVE"
+            drives.append(
+                _format_usb_drive_entry(
+                    dl=dl,
+                    label=label,
+                    fs=norm_fs,
+                    dtype=dtype,
+                    bus_type=effective_bus,
+                    size_gb=size_gb,
+                    unique_id=f"SERIAL:{serial.value:08X}" if serial.value else "",
+                    disk_number=disk_num,
+                )
+            )
+    except Exception:
+        return drives, True
+    finally:
+        try:
+            kernel32.SetErrorMode(old_err_mode)
+        except Exception:
+            pass
+
+    return drives, (needs_ps_fallback or len(drives) == 0)
+
+
+def _list_usb_drives_powershell() -> list[dict[str, Any]]:
+    """PowerShell / CIM fallback for enumerating USB / SD / Removable / FAT32 drives on Windows."""
+    drives: list[dict[str, Any]] = []
     ps_cmd = (
-        "Get-Volume | Where-Object { $_.DriveLetter -ne $null -and $_.DriveLetter -ne 'C' } | ForEach-Object { "
-        "$v = $_; "
-        "$p = Get-Partition -DriveLetter $v.DriveLetter -ErrorAction SilentlyContinue; "
-        "$d = if ($p) { Get-Disk -Number $p.DiskNumber -ErrorAction SilentlyContinue } else { $null }; "
-        "[PSCustomObject]@{ "
-        "DriveLetter=$v.DriveLetter; Label=$v.FileSystemLabel; FileSystem=$v.FileSystem; "
-        "DriveType=$v.DriveType; Size=$v.Size; UniqueId=$v.UniqueId; "
-        "BusType=if($d){$d.BusType}else{''}; IsBoot=if($d){[bool]$d.IsBoot}else{$false}; "
-        "IsSystem=if($d){[bool]$d.IsSystem}else{$false}; DiskNumber=if($d){$d.Number}else{-1} "
-        "} } | ConvertTo-Json -Compress"
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+        "$vols = @(Get-Volume -ErrorAction SilentlyContinue | Where-Object { $_.DriveLetter -ne $null }); "
+        "if ($vols.Count -gt 0) { "
+        "  $vols | ForEach-Object { "
+        "    $v = $_; "
+        "    $dl = ([string]$v.DriveLetter).Trim(' ', [char]0); "
+        "    if ($dl -match '^[A-BD-Za-bd-z]$') { "
+        "      $p = @(Get-Partition -DriveLetter $dl -ErrorAction SilentlyContinue) | Select-Object -First 1; "
+        "      $d = if ($p -and $null -ne $p.DiskNumber) { Get-Disk -Number $p.DiskNumber -ErrorAction SilentlyContinue } else { $null }; "
+        "      [PSCustomObject]@{ "
+        "        DriveLetter=$dl; Label=[string]$v.FileSystemLabel; FileSystem=[string]$v.FileSystem; "
+        "        DriveType=if($null -ne $v.DriveType){$v.DriveType.ToString()}else{''}; Size=$v.Size; UniqueId=[string]$v.UniqueId; "
+        "        BusType=if($d -and $null -ne $d.BusType){$d.BusType.ToString()}else{''}; "
+        "        IsBoot=if($d){[bool]$d.IsBoot}else{$false}; "
+        "        IsSystem=if($d){[bool]$d.IsSystem}else{$false}; "
+        "        DiskNumber=if($d -and $null -ne $d.Number){[int]$d.Number}elseif($p -and $null -ne $p.DiskNumber){[int]$p.DiskNumber}else{-1} "
+        "      } "
+        "    } "
+        "  } | ConvertTo-Json -Compress "
+        "} else { "
+        "  Get-CimInstance Win32_LogicalDisk -ErrorAction SilentlyContinue | Where-Object { $_.DeviceID -and $_.DeviceID -notlike 'C*' } | ForEach-Object { "
+        "    [PSCustomObject]@{ "
+        "      DriveLetter=([string]$_.DeviceID).TrimEnd(':'); Label=[string]$_.VolumeName; FileSystem=[string]$_.FileSystem; "
+        "      DriveType=[string]$_.DriveType; Size=$_.Size; UniqueId=[string]$_.VolumeSerialNumber; "
+        "      BusType=''; IsBoot=$false; IsSystem=$false; DiskNumber=-1 "
+        "    } "
+        "  } | ConvertTo-Json -Compress "
+        "}"
     )
     try:
         res = subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps_cmd],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        if res.returncode == 0 and res.stdout.strip():
-            parsed = json.loads(res.stdout.strip())
+        if res.returncode == 0 and res.stdout and res.stdout.strip():
+            raw_out = res.stdout.strip()
+            idx_arr = raw_out.find("[")
+            idx_obj = raw_out.find("{")
+            if idx_arr >= 0 and (idx_obj < 0 or idx_arr < idx_obj):
+                raw_out = raw_out[idx_arr:]
+            elif idx_obj >= 0:
+                raw_out = raw_out[idx_obj:]
+            parsed = json.loads(raw_out)
             if isinstance(parsed, dict):
                 parsed = [parsed]
             for item in parsed:
-                dl = str(item.get("DriveLetter", "")).strip().upper()
-                if not dl or dl == "C":
+                if not isinstance(item, dict):
+                    continue
+                dl = str(item.get("DriveLetter", "")).strip().rstrip(":\\/").upper()
+                if len(dl) != 1 or not dl.isalpha() or dl == "C":
                     continue
                 if item.get("IsBoot") or item.get("IsSystem"):
                     continue
-                bus_type = str(item.get("BusType") or "").upper()
-                dtype = str(item.get("DriveType") or "")
-                fs = str(item.get("FileSystem") or "RAW").upper()
-                if dtype != "Removable" and bus_type not in ("USB", "SD"):
-                    continue
+                bus_type = _normalize_bus_type(item.get("BusType"))
+                dtype = _normalize_drive_type(item.get("DriveType"))
+                norm_fs, is_fat32 = _normalize_filesystem(item.get("FileSystem"))
+                is_usb_bus = bus_type in ("USB", "SD", "MMC")
+                is_removable = dtype == "Removable"
+                if not (is_removable or is_usb_bus):
+                    if not (is_fat32 and not bus_type and not _is_windows_system_or_esp_root(Path(f"{dl}:\\"))):
+                        continue
                 size_gb = round((item.get("Size") or 0) / (1024**3), 1)
-                label = item.get("Label") or "USB_DRIVE"
-                drives.append({
-                    "letter": f"{dl}:\\",
-                    "label": label,
-                    "filesystem": fs,
-                    "drive_type": dtype,
-                    "bus_type": bus_type,
-                    "unique_id": str(item.get("UniqueId") or ""),
-                    "disk_number": int(item.get("DiskNumber") or -1),
-                    "size_gb": size_gb,
-                    "is_fat32": fs == "FAT32",
-                    "display": f"{dl}:\\ [{label} | {fs} | {size_gb} GB | {bus_type or dtype}]",
-                })
+                label = str(item.get("Label") or "").strip() or "USB_DRIVE"
+                drives.append(
+                    _format_usb_drive_entry(
+                        dl=dl,
+                        label=label,
+                        fs=norm_fs,
+                        dtype=dtype or ("Removable" if is_removable else "Fixed"),
+                        bus_type=bus_type or ("USB" if (is_removable or is_fat32) else ""),
+                        size_gb=size_gb,
+                        unique_id=str(item.get("UniqueId") or ""),
+                        disk_number=int(item.get("DiskNumber") if item.get("DiskNumber") is not None else -1),
+                    )
+                )
     except Exception:
         pass
     return drives
 
+
+def list_usb_drives() -> list[dict[str, Any]]:
+    """Enumerate verified removable USB / SD / FAT32 drives on Windows 10/11 using native Win32 APIs + PowerShell/CIM fallback."""
+    if not sys.platform.startswith("win"):
+        return []
+
+    win32_drives, run_ps = _list_usb_drives_win32()
+    by_letter: dict[str, dict[str, Any]] = {d["letter"].upper(): d for d in win32_drives}
+
+    if run_ps:
+        ps_drives = _list_usb_drives_powershell()
+        for pd in ps_drives:
+            key = pd["letter"].upper()
+            if key not in by_letter:
+                by_letter[key] = pd
+            else:
+                existing = by_letter[key]
+                if not existing.get("unique_id") and pd.get("unique_id"):
+                    existing["unique_id"] = pd["unique_id"]
+                if existing.get("disk_number", -1) < 0 and pd.get("disk_number", -1) >= 0:
+                    existing["disk_number"] = pd["disk_number"]
+
+    merged = list(by_letter.values())
+    merged.sort(key=lambda d: (0 if d.get("is_fat32") else 1, d["letter"]))
+    return merged
 
 def _is_reparse_or_symlink(path: Path) -> bool:
     """Check if path is a symlink, junction, or Windows reparse point.
@@ -1744,7 +2105,7 @@ def build_and_stage_usb(
 
     if target_mode == "usb":
         verified_drives = list_usb_drives()
-        norm_root = str(usb_root).rstrip("\\/").upper()
+        norm_root = re.sub(r"^\\\\\?\\", "", str(usb_root)).rstrip("\\/").upper()
         matched_drive = next(
             (d for d in verified_drives if d["letter"].rstrip("\\/").upper() == norm_root),
             None,
