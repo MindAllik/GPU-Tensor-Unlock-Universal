@@ -4,6 +4,7 @@
 EFI_STATUS GuIoOpen(EFI_HANDLE Image,EFI_SYSTEM_TABLE *Table);
 EFI_STATUS GuIoClose(VOID);
 BOOLEAN GuLocalEsp(EFI_HANDLE Handle);
+BOOLEAN GuIsBootVolume(EFI_HANDLE Handle);
 EFI_STATUS GuLoadAssets(VOID);
 EFI_STATUS GuSavePromDump(const VOID *Data,UINTN Size);
 VOID GuReleaseAssets(VOID);

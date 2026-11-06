@@ -18,6 +18,7 @@ static EFI_GUID PciGuid=EFI_PCI_IO_PROTOCOL_GUID,GopGuid=EFI_GRAPHICS_OUTPUT_PRO
   PathGuid=EFI_DEVICE_PATH_PROTOCOL_GUID,GlobalGuid=EFI_GLOBAL_VARIABLE;
 static EFI_SYSTEM_TABLE *Table;
 static UINT32 InitialConfig[64];
+static BOOLEAN InitialBootBme;
 static const char *Stage;
 static BOOLEAN ExpectDetached;
 static GU_RELEASE_OWNER PendingOwner;
@@ -142,7 +143,8 @@ static EFI_STATUS ConfigCheck(BOOLEAN Save) {
    * Firmware-assigned MMIO addresses differ from the reference motherboard. */
   BOOLEAN class_ok=(config[2]==GU_BOARD_CLASS_REV) ||
     (((config[2]>>24)==0x03U) && ((((config[2]>>16)&0xffU)==0x00U) || (((config[2]>>16)&0xffU)==0x02U)) && ((config[2]&0xf0U)==0xa0U));
-  BOOLEAN valid=checked && class_ok &&
+  BOOLEAN bme_ok=!Gu.owned || !(config[1]&4U);
+  BOOLEAN valid=checked && class_ok && bme_ok &&
     !(config[4]&1U) && ((config[4]&6U)==0 || (config[4]&6U)==4) &&
     !(config[(caps.pcie+8)/4]&0x00200000U);
   BOOLEAN same=Save || !memcmp(config,InitialConfig,sizeof(config));
@@ -152,7 +154,7 @@ static EFI_STATUS ConfigCheck(BOOLEAN Save) {
     (unsigned)caps.pm,(unsigned)caps.pcie,(unsigned)caps.msi,(unsigned)caps.msix);
   if(!valid)return EFI_UNSUPPORTED;
   if(!same)return EFI_NOT_READY;
-  if(Save)memcpy(InitialConfig,config,sizeof(config));
+  if(Save){memcpy(InitialConfig,config,sizeof(config));InitialBootBme=(config[1]&4U)!=0;}
   Gu.pm_cap=caps.pm;Gu.pcie_cap=caps.pcie;Gu.pcie_version=caps.pcie_version;Gu.msi_cap=caps.msi;Gu.msix_cap=caps.msix;
   return EFI_SUCCESS;
 }
@@ -165,6 +167,24 @@ static EFI_STATUS RestoreDecode(VOID) {
   status=ReadConfig(current);if(EFI_ERROR(status))return status;
   GuLogText("config before decode restore (256 valid bytes):\n");ConfigLog(current);
   if(!GuTargetConfig(current,segment,bus,device,function))return EFI_UNSUPPORTED;
+  if(InitialBootBme) {
+    /* Motherboard BIOS / UEFI GOP had BME enabled while GOP was bound. Now that
+       GOP is disconnected and we own the controller exclusively, ensure BME is
+       disabled in both PciIo attributes and PCI Command before transaction start. */
+    InitialConfig[1]&=(UINT32)~4U;
+    if(Gu.pci->Attributes) {
+      UINT64 cur_attr=0;
+      if(!EFI_ERROR(Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&cur_attr)) &&
+         (cur_attr&EFI_PCI_IO_ATTRIBUTE_BUS_MASTER)) {
+        Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationDisable,EFI_PCI_IO_ATTRIBUTE_BUS_MASTER,NULL);
+      }
+    }
+    if(current[1]&4U) {
+      EFI_STATUS clr=GuClearMaster();
+      if(EFI_ERROR(clr))return clr;
+      status=ReadConfig(current);if(EFI_ERROR(status))return status;
+    }
+  }
   UINT32 missing=InitialConfig[1]&~current[1]&3U;
   memcpy(normalized,current,sizeof(normalized));normalized[1]|=missing;
   /* Restore only cleared, previously enabled IO/MEM bits. Every other bit,
@@ -466,7 +486,7 @@ EFI_STATUS EFIAPI EfiMain(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
   (void)Image;(void)St;return EFI_UNSUPPORTED;
 #endif
   if(!St || !St->BootServices || !St->RuntimeServices)return EFI_INVALID_PARAMETER;
-  WindowsImage=NULL;WindowsVolume=NULL;WindowsDevicePath=NULL;GuScreenDetached=FALSE;ExpectDetached=FALSE;PromDigestLatched=FALSE;LatchedPromSpanBytes=0;InitialTargetMatched=0;LatchedChip=0;
+  WindowsImage=NULL;WindowsVolume=NULL;WindowsDevicePath=NULL;GuScreenDetached=FALSE;ExpectDetached=FALSE;PromDigestLatched=FALSE;LatchedPromSpanBytes=0;InitialTargetMatched=0;LatchedChip=0;InitialBootBme=FALSE;
   DisplaysLatched=FALSE;OtherCount=0;memset(OtherDisplays,0,sizeof(OtherDisplays));
   Table=St;GuInit(St->BootServices,NULL);Gu.image=Image;Gu.display_check=DisplayCheck;Gu.verify_prom_span=GuVerifyPreparedPromSpan;
   memset(&PendingOwner,0,sizeof(PendingOwner));
@@ -545,6 +565,18 @@ EFI_STATUS EFIAPI EfiMain(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
     Stage="bar0-after-release";status=Step(BarCheck());if(EFI_ERROR(status))goto finish;
     Stage="cold-after-release";status=Step(ColdCheck());if(EFI_ERROR(status))goto finish;
     Stage="prom-after-release";status=Step(PromCheck());if(EFI_ERROR(status))goto finish;
+  } else if(already_exclusive && InitialBootBme) {
+    Stage="decode-after-release";
+    InitialConfig[1]&=(UINT32)~4U;
+    if(Gu.pci->Attributes) {
+      UINT64 cur_attr=0;
+      if(!EFI_ERROR(Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&cur_attr)) &&
+         (cur_attr&EFI_PCI_IO_ATTRIBUTE_BUS_MASTER)) {
+        Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationDisable,EFI_PCI_IO_ATTRIBUTE_BUS_MASTER,NULL);
+      }
+    }
+    status=Step(GuClearMaster());if(EFI_ERROR(status))goto finish;
+    Stage="config-after-release";status=Step(ConfigCheck(FALSE));if(EFI_ERROR(status))goto finish;
   }
   GuLogText("ARMED: one transaction is starting. Do not reset or remove the USB.\n");
   if(!GuLogReady()){status=EFI_DEVICE_ERROR;goto finish;}

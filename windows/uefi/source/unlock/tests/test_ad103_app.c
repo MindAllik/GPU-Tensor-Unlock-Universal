@@ -384,6 +384,7 @@ static EFI_STATUS EFIAPI bar_info(EFI_PCI_IO_PROTOCOL *p,UINT8 bar,UINT64 *suppo
   r->Desc=ACPI_ADDRESS_SPACE_DESCRIPTOR;r->Len=sizeof(*r)-3;r->ResType=0;r->AddrSpaceGranularity=32;
   r->AddrRangeMin=0x80000000;r->AddrRangeMax=0x80ffffff;r->AddrLen=app_mode==APP_BAD_BAR?4096:0x1000000;
   if(extra_case==106){r->AddrRangeMin=0xd5000000;r->AddrRangeMax=0xd5ffffff;}
+  if(extra_case==107){r->AddrRangeMin=0xfb000000;r->AddrRangeMax=0xfbffffff;}
   if(app_mode==APP_BAR_MAX)r->AddrRangeMax=0x83000000;
   /* Pinned EDK2 PciIo.c returns PciBar.Alignment, not the inclusive end. */
   if(app_mode==APP_EDK2_BAR)r->AddrRangeMax=0x00ffffff;
@@ -660,7 +661,7 @@ int main(int argc,char **argv) {
     dispose_host_fixture();
   }
 
-  for(volatile int sb=100;sb<=106;sb++) {
+  for(volatile int sb=100;sb<=107;sb++) {
     extra_case=sb;app_setup(APP_HANDOFF);
     if(sb==106) {
       /* RUN02 workstation PCI snapshot: command, BARs and PCIe controls. */
@@ -671,9 +672,19 @@ int main(int argc,char **argv) {
       *(UINT32*)(config+0x30)=0xd6000000;*(UINT32*)(config+0x7c)=0x10008de1;
       *(UINT32*)(config+0x80)=0x00005937;
     }
+    if(sb==107) {
+      /* XFX/PNY RTX 3090 24GB hardware PCI snapshot: UEFI GOP starts with BME=1 (0x00100007) and 32-bit BAR0 (0xfb000000). */
+      *(UINT32*)(config+4)=0x00100007;
+      *(UINT32*)(config+0x10)=0xfb000000;*(UINT32*)(config+0x14)=0xd000000c;
+      *(UINT32*)(config+0x18)=0x00000000;*(UINT32*)(config+0x1c)=0xe000000c;
+      *(UINT32*)(config+0x20)=0x00000000;*(UINT32*)(config+0x24)=0x0000e001;
+      *(UINT32*)(config+0x30)=0xfc000000;*(UINT32*)(config+0x78)=0x0012b410;
+      *(UINT32*)(config+0x7c)=0x112c8de1;*(UINT32*)(config+0x80)=0x00092930;
+      *(UINT32*)(config+0xb4)=0x01140009;
+    }
     volatile EFI_STATUS result=EFI_ABORTED;
     int jumped=setjmp(escape_halt);if(!jumped)result=EfiMain(H(1),&st);
-    if(sb==100 || sb==102 || sb==103 || sb==104 || sb==106)CHECK(windows_started && jumped==2 && !halted);
+    if(sb==100 || sb==102 || sb==103 || sb==104 || sb==106 || sb==107)CHECK(windows_started && jumped==2 && !halted);
     else CHECK(!windows_started && !disconnect_calls && !fake.mmio_writes && EFI_ERROR(result));
     if(sb==105)CHECK(strstr(report_text,"handle=0x17") && strstr(report_text,"child ancestry:") && strstr(report_text,"stage=prom") && strstr(report_text,"stage=assets") && strstr(report_text,"stage=windows-preload"));
     printf("Policy/topology case %d PASS\n",sb);dispose_host_fixture();

@@ -388,5 +388,101 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
             self.assertIn("self._refresh_deps_labels()", src, f"{fname} must call _refresh_deps_labels on language switch")
 
 
+    def test_win32_ioctl_esp_detection_and_auto_esp_profile_fallback(self) -> None:
+        """Verify Win32 IOCTL_DISK_GET_DRIVE_LAYOUT_EX GPT ESP parsing and AUTO ESP GUID fallback
+        when PowerShell Get-Partition times out or returns empty."""
+        import ctypes
+        import struct
+        from unittest import mock
+
+        # 1. Round-trip _ESP_TYPE_GUID_LE and arbitrary GPT partition GUID
+        self.assertEqual(
+            core_detector._packed_bytes_to_guid_str(core_detector._ESP_TYPE_GUID_LE),
+            "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}",
+        )
+        sample_guid = "{7a8150e0-c25f-4a16-9473-4a162c4d459a}"
+        packed = core_detector.guid_string_to_packed_bytes(sample_guid)
+        self.assertEqual(core_detector._packed_bytes_to_guid_str(packed), sample_guid)
+
+        # 2. Simulate DRIVE_LAYOUT_INFORMATION_EX (48-byte header + two 144-byte PARTITION_INFORMATION_EX entries)
+        buf = bytearray(48 + 2 * 144)
+        struct.pack_into("<II", buf, 0, 1, 2)  # PartitionStyle=1 (GPT), PartitionCount=2
+        # Entry 0: EFI System Partition (Part 1)
+        off0 = 48
+        struct.pack_into("<I", buf, off0 + 0, 1)  # PartitionStyle=1 (GPT)
+        struct.pack_into("<I", buf, off0 + 24, 1)  # PartitionNumber=1
+        buf[off0 + 32 : off0 + 48] = core_detector._ESP_TYPE_GUID_LE
+        buf[off0 + 48 : off0 + 64] = packed
+        # Entry 1: Basic Data Partition (Part 2)
+        off1 = 48 + 144
+        struct.pack_into("<I", buf, off1 + 0, 1)
+        struct.pack_into("<I", buf, off1 + 24, 2)
+        buf[off1 + 32 : off1 + 48] = b"\xa2\xa0\xd0\xeb\xe5\xb9\x33\x44\x87\xc0\x68\xb6\xb7\x26\x99\xc7"
+        buf[off1 + 48 : off1 + 64] = b"\x11" * 16
+
+        class FakeKernel32:
+            def SetErrorMode(self, mode: int) -> int:
+                return 0
+
+            def CreateFileW(self, path: Any, *args: Any) -> int:
+                s = getattr(path, "value", str(path))
+                if "PhysicalDrive0" in s or "C:" in s:
+                    return 100
+                return -1
+
+            def DeviceIoControl(
+                self, handle: int, ioctl: int, in_buf: Any, in_sz: int, out_buf: Any, out_sz: int, bytes_ret_ptr: Any, ovl: Any
+            ) -> int:
+                if ioctl == 0x002D1080:  # IOCTL_STORAGE_GET_DEVICE_NUMBER
+                    raw_num = struct.pack("<III", 7, 0, 2)
+                    ctypes.memmove(out_buf, raw_num, len(raw_num))
+                    bytes_ret_ptr._obj.value = len(raw_num)
+                    return 1
+                if ioctl == 0x00070050:  # IOCTL_DISK_GET_DRIVE_LAYOUT_EX
+                    ctypes.memmove(out_buf, bytes(buf), len(buf))
+                    bytes_ret_ptr._obj.value = len(buf)
+                    return 1
+                return 0
+
+            def CloseHandle(self, handle: int) -> int:
+                return 1
+
+        fake_windll = mock.MagicMock()
+        fake_windll.kernel32 = FakeKernel32()
+        with mock.patch.object(core_detector.ctypes, "windll", fake_windll, create=True):
+            esps = core_detector._detect_windows_esp_win32()
+
+        self.assertEqual(len(esps), 1)
+        self.assertEqual(esps[0]["DiskNumber"], 0)
+        self.assertEqual(esps[0]["PartitionNumber"], 1)
+        self.assertEqual(esps[0]["Guid"], sample_guid)
+        self.assertTrue(esps[0]["OnBootDisk"])
+
+        # 3. Verify validate_target_profile accepts empty esp_guid ("") or "AUTO" when PowerShell timed out
+        rtx3090_cfg = {
+            "gpu_name": "NVIDIA GeForce RTX 3090",
+            "die_name": "GA102",
+            "chip_id_hex": "0x172000a1",
+            "board_id_hex": "0x220410de",
+            "subsystem_id_hex": "0x38811462",
+            "segment_hex": "0x0",
+            "bus_hex": "0x01",
+            "device_hex": "0x0",
+            "function_hex": "0x0",
+            "vram_min_hex": "0x5bf0",
+            "vram_max_hex": "0x6400",
+            "esp_guid": "",
+            "esp_part_num": 0,
+        }
+        val_auto = core_detector.validate_target_profile(rtx3090_cfg)
+        self.assertEqual(val_auto["esp_guid"], "AUTO")
+        self.assertEqual(
+            val_auto["esp_macro"],
+            "0x00000000U,0x0000U,0x0000U,{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}",
+        )
+        fake_efi = b"MZ_FAKE_3090" + struct.pack("<I", 0x220410DE) + struct.pack("<I", 0x38811462)
+        core_detector.verify_compiled_efi_profile(fake_efi, val_auto)
+
+
 if __name__ == "__main__":
     unittest.main()

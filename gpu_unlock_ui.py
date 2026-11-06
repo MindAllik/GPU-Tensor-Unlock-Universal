@@ -880,7 +880,10 @@ class UniversalUnlockApp(tk.Tk):
     def _run_stage_job(self, target_path: str, target_mode: str) -> None:
         cfg = self._collect_profile_cfg()
         try:
-            core_detector.validate_target_profile(cfg)
+            validated_prof = core_detector.validate_target_profile(cfg)
+            if not cfg.get("esp_guid") and validated_prof.get("esp_guid"):
+                cfg["esp_guid"] = validated_prof["esp_guid"]
+                self.var_esp_guid.set(validated_prof["esp_guid"])
         except Exception as exc:
             messagebox.showerror("Invalid Profile", str(exc))
             self.log(f"[ERROR] Profile validation failed: {exc}")

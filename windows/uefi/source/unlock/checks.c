@@ -36,9 +36,11 @@ BOOLEAN GuCheckConfig(const UINT32 Config[64], UINTN Segment, UINTN Bus,
       (ConfigByte(Config, PCI_HEADER_TYPE_OFFSET) & 0x7fU) != HEADER_TYPE_DEVICE)
     return FALSE;
 
+  /* Note: UEFI GOP drivers and motherboard firmwares (e.g. AMD AM4/AM5 + RTX 3090)
+   * frequently enable EFI_PCI_COMMAND_BUS_MASTER (0x04) while GOP is bound.
+   * Pre-release preflight allows BME=1; ConfigCheck enforces BME=0 once Gu.owned is TRUE. */
   Command = ConfigWord(Config, PCI_COMMAND_OFFSET);
   if ((Command & EFI_PCI_COMMAND_MEMORY_SPACE) == 0 ||
-      (Command & EFI_PCI_COMMAND_BUS_MASTER) != 0 ||
       (Config[PCI_EXPANSION_ROM_BASE / 4] & 1U) != 0 ||
       (ConfigWord(Config, PCI_PRIMARY_STATUS_OFFSET) & EFI_PCI_STATUS_CAPABILITY) == 0)
     return FALSE;

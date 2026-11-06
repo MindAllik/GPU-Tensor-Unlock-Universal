@@ -12,6 +12,7 @@ static EFI_GUID LoadedGuid=EFI_LOADED_IMAGE_PROTOCOL_GUID,PathGuid=EFI_DEVICE_PA
   FsGuid=EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,InfoGuid=EFI_FILE_INFO_ID,
   BlockIoGuid=EFI_BLOCK_IO_PROTOCOL_GUID;
 static EFI_SYSTEM_TABLE *Table;
+static EFI_HANDLE BootDeviceHandle;
 static EFI_FILE_PROTOCOL *Root,*Parent,*Run,*Report;
 static BOOLEAN LogFault;
 BOOLEAN GuScreenDetached;
@@ -76,12 +77,12 @@ static BOOLEAN UsbPath(EFI_HANDLE Handle) {
     UINTN n=path->Length[0]+((UINTN)path->Length[1]<<8);
     if(n<4 || n>4096-total)return FALSE;
     if(path->Type==MESSAGING_DEVICE_PATH &&
-      ((path->SubType==MSG_USB_DP && n==sizeof(USB_DEVICE_PATH)) ||
-       (path->SubType==MSG_USB_CLASS_DP && n==sizeof(USB_CLASS_DEVICE_PATH)) ||
+      ((path->SubType==MSG_USB_DP && n>=sizeof(USB_DEVICE_PATH)) ||
+       (path->SubType==MSG_USB_CLASS_DP && n>=sizeof(USB_CLASS_DEVICE_PATH)) ||
        (path->SubType==MSG_USB_WWID_DP && n>=sizeof(USB_WWID_DEVICE_PATH)) ||
-       (path->SubType==MSG_SD_DP && n==sizeof(SD_DEVICE_PATH)) ||
-       (path->SubType==MSG_EMMC_DP && n==sizeof(EMMC_DEVICE_PATH)) ||
-       (path->SubType==MSG_UFS_DP && n==sizeof(UFS_DEVICE_PATH))))usb=TRUE;
+       (path->SubType==MSG_SD_DP && n>=sizeof(SD_DEVICE_PATH)) ||
+       (path->SubType==MSG_EMMC_DP && n>=sizeof(EMMC_DEVICE_PATH)) ||
+       (path->SubType==MSG_UFS_DP && n>=sizeof(UFS_DEVICE_PATH))))usb=TRUE;
     if(path->Type==BBS_DEVICE_PATH && path->SubType==BBS_BBS_DP &&
       n>=sizeof(BBS_BBS_DEVICE_PATH) && ((BBS_BBS_DEVICE_PATH *)path)->DeviceType==BBS_TYPE_USB)usb=TRUE;
     if(path->Type==END_DEVICE_PATH_TYPE)return usb && n==4 && path->SubType==END_ENTIRE_DEVICE_PATH_SUBTYPE;
@@ -89,7 +90,12 @@ static BOOLEAN UsbPath(EFI_HANDLE Handle) {
   }
   return FALSE;
 }
+static BOOLEAN IsZeroGuid(const EFI_GUID *G) {
+  static const EFI_GUID zero={0,0,0,{0,0,0,0,0,0,0,0}};
+  return memcmp(G,&zero,sizeof(zero))==0;
+}
 static BOOLEAN EspGuidPath(EFI_HANDLE Handle,const EFI_GUID *Want,UINT32 Partition) {
+  if(IsZeroGuid(Want))return FALSE;
   EFI_DEVICE_PATH_PROTOCOL *path=NULL;
   if(EFI_ERROR(Table->BootServices->HandleProtocol(Handle,&PathGuid,(VOID **)&path)) || !path)return FALSE;
   UINTN off=0;
@@ -134,6 +140,10 @@ BOOLEAN GuLocalEsp(EFI_HANDLE Handle) {
   /* Match the unique 128-bit GPT Partition GUID and optional KOH_WINDOWS_ESP_PART (0 = wildcard). */
   return EspGuidPath(Handle,&guid,KOH_WINDOWS_ESP_PART);
 }
+BOOLEAN GuIsBootVolume(EFI_HANDLE Handle) {
+  if(!BootDeviceHandle || !Handle)return FALSE;
+  return Handle==BootDeviceHandle || SameDevicePath(Handle,BootDeviceHandle);
+}
 static BOOLEAN GuPayloadEsp(EFI_HANDLE Handle) {
   static const EFI_GUID guid={KOH_PAYLOAD_ESP_GUID};
   /* Partition NUMBER is not pinned: diskpart renumbered the payload from the
@@ -152,11 +162,12 @@ static EFI_STATUS Metadata(EFI_FILE_PROTOCOL *File,BOOLEAN Directory,UINTN Expec
   return EFI_SUCCESS;
 }
 EFI_STATUS GuIoOpen(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
-  Table=St;Root=Parent=Run=Report=NULL;LogFault=FALSE;memset(GuAssets,0,sizeof(GuAssets));
+  Table=St;BootDeviceHandle=NULL;Root=Parent=Run=Report=NULL;LogFault=FALSE;memset(GuAssets,0,sizeof(GuAssets));
   EFI_LOADED_IMAGE_PROTOCOL *loaded=NULL;EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs=NULL;
   EFI_STATUS status=Table->BootServices->HandleProtocol(Image,&LoadedGuid,(VOID **)&loaded);
   if(EFI_ERROR(status) || !loaded || !(UsbPath(loaded->DeviceHandle) || GuLocalEsp(loaded->DeviceHandle) ||
     GuPayloadEsp(loaded->DeviceHandle)))return EFI_UNSUPPORTED;
+  BootDeviceHandle=loaded->DeviceHandle;
   status=Table->BootServices->HandleProtocol(loaded->DeviceHandle,&FsGuid,(VOID **)&fs);
   if(EFI_ERROR(status) || !fs)return EFI_UNSUPPORTED;
   status=fs->OpenVolume(fs,&Root);if(EFI_ERROR(status) || !Root)return EFI_DEVICE_ERROR;
@@ -288,6 +299,7 @@ VOID GuReleaseAssets(VOID) {
 EFI_STATUS GuIoClose(VOID) {
   EFI_FILE_PROTOCOL **files[]={&Report,&Run,&Parent,&Root};EFI_STATUS result=EFI_SUCCESS;
   if(!GuSafeToReturn())return EFI_ACCESS_DENIED;
+  BootDeviceHandle=NULL;
   for(UINTN i=0;i<4;i++)if(*files[i]) {
     /* EFI_FILE_PROTOCOL.Close invalidates the handle even on error; close all handles and preserve first error. */
     EFI_FILE_PROTOCOL *file=*files[i];*files[i]=NULL;

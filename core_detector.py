@@ -383,11 +383,12 @@ def verify_compiled_efi_profile(efi_bytes: bytes, validated: dict[str, Any]) -> 
             raise RuntimeError(
                 f"Compiled BOOTX64.EFI does not contain target GU_BOARD_SUBSYSTEM 0x{validated['subsys_id']:08x}!"
             )
-    esp_bytes = guid_string_to_packed_bytes(validated['esp_guid'])
-    if esp_bytes not in efi_bytes:
-        raise RuntimeError(
-            f"Compiled BOOTX64.EFI does not contain target KOH_WINDOWS_ESP_GUID {validated['esp_guid']}!"
-        )
+    if validated.get("esp_guid") and validated["esp_guid"] != "AUTO":
+        esp_bytes = guid_string_to_packed_bytes(validated["esp_guid"])
+        if esp_bytes not in efi_bytes:
+            raise RuntimeError(
+                f"Compiled BOOTX64.EFI does not contain target KOH_WINDOWS_ESP_GUID {validated['esp_guid']}!"
+            )
     if (validated['board_id'], validated['subsys_id']) != (0x278210DE, 0xF2941569):
         if struct.pack("<I", 0xF2941569) in efi_bytes:
             raise RuntimeError(
@@ -467,13 +468,31 @@ def validate_target_profile(config: dict[str, Any]) -> dict[str, Any]:
     if vram_max - vram_min > 0x1000:
         raise ValueError(f"VRAM range [{vram_min:#x}..{vram_max:#x}] is wider than 4096 MiB")
 
-    esp_guid = str(config.get("esp_guid", "")).strip()
-    esp_macro = guid_string_to_c_macro(esp_guid)
-    esp_part = _parse_hex_int(config.get("esp_part_num", 0), "esp_part_num", 0, 128)
+    esp_guid_raw = str(config.get("esp_guid", "") or "").strip()
+    if not esp_guid_raw and sys.platform.startswith("win"):
+        try:
+            win_esps = _detect_windows_esp_win32()
+            boot_esps = [e for e in win_esps if e.get("OnBootDisk") and e.get("Guid")]
+            chosen_esp = boot_esps[0] if len(boot_esps) == 1 else (win_esps[0] if len(win_esps) == 1 else (boot_esps[0] if boot_esps else None))
+            if chosen_esp and chosen_esp.get("Guid"):
+                esp_guid_raw = str(chosen_esp["Guid"]).strip()
+        except Exception:
+            pass
 
-    clean_guid = esp_guid.strip("{}").replace("-", "")
-    first_dword = int(clean_guid[0:8], 16) ^ 1
-    payload_macro = guid_string_to_c_macro(f"{{{first_dword:08x}-{clean_guid[8:12]}-{clean_guid[12:16]}-{clean_guid[16:20]}-{clean_guid[20:32]}}}")
+    if not esp_guid_raw or esp_guid_raw.upper() == "AUTO":
+        esp_guid = "AUTO"
+        esp_macro = "0x00000000U,0x0000U,0x0000U,{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}"
+        esp_part = 0
+        payload_macro = "0x00000001U,0x0000U,0x0000U,{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}"
+    else:
+        esp_guid = esp_guid_raw
+        esp_macro = guid_string_to_c_macro(esp_guid)
+        esp_part = _parse_hex_int(config.get("esp_part_num", 0), "esp_part_num", 0, 128)
+        clean_guid = esp_guid.strip("{}").replace("-", "")
+        first_dword = int(clean_guid[0:8], 16) ^ 1
+        payload_macro = guid_string_to_c_macro(
+            f"{{{first_dword:08x}-{clean_guid[8:12]}-{clean_guid[12:16]}-{clean_guid[16:20]}-{clean_guid[20:32]}}}"
+        )
 
     prom_sha = str(config.get("prom_sha256", "AUTO") or "AUTO").strip()
     rom_sha = str(config.get("rom_sha256", "AUTO") or "AUTO").strip()
@@ -1262,45 +1281,62 @@ def detect_host_environment() -> dict[str, Any]:
             info[k] = chosen[k]
 
     if sys.platform.startswith("win"):
-        ps_cmd = (
-            "$bootDisks = @(Get-Disk | Where-Object { $_.IsBoot -eq $true -or $_.IsSystem -eq $true } | Select-Object -ExpandProperty Number); "
-            "$esps = @(Get-Partition | Where-Object { $_.GptType -eq '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' } | "
-            "Select-Object DiskNumber, PartitionNumber, Guid, @{N='OnBootDisk';E={$bootDisks -contains $_.DiskNumber}}); "
-            "$sb = try { [bool](Confirm-SecureBootUEFI) } catch { $null }; "
-            "$bl = try { $v = Get-BitLockerVolume -MountPoint 'C:' -ErrorAction Stop; ($v.ProtectionStatus -eq 'On' -or $v.VolumeStatus -ne 'FullyDecrypted') } catch { $null }; "
-            "[PSCustomObject]@{ Esps=$esps; SecureBoot=$sb; BitLocker=$bl } | ConvertTo-Json -Compress -Depth 4"
-        )
+        esps = _detect_windows_esp_win32()
+        if esps:
+            ps_cmd = (
+                "$sb = try { [bool](Confirm-SecureBootUEFI) } catch { $null }; "
+                "$bl = try { $v = Get-BitLockerVolume -MountPoint 'C:' -ErrorAction Stop; ($v.ProtectionStatus -eq 'On' -or $v.VolumeStatus -ne 'FullyDecrypted') } catch { $null }; "
+                "[PSCustomObject]@{ SecureBoot=$sb; BitLocker=$bl } | ConvertTo-Json -Compress"
+            )
+            ps_timeout = 4
+        else:
+            ps_cmd = (
+                "$bootDisks = @(Get-Disk | Where-Object { $_.IsBoot -eq $true -or $_.IsSystem -eq $true } | Select-Object -ExpandProperty Number); "
+                "$esps = @(Get-Partition | Where-Object { $_.GptType -eq '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' } | "
+                "Select-Object DiskNumber, PartitionNumber, Guid, @{N='OnBootDisk';E={$bootDisks -contains $_.DiskNumber}}); "
+                "$sb = try { [bool](Confirm-SecureBootUEFI) } catch { $null }; "
+                "$bl = try { $v = Get-BitLockerVolume -MountPoint 'C:' -ErrorAction Stop; ($v.ProtectionStatus -eq 'On' -or $v.VolumeStatus -ne 'FullyDecrypted') } catch { $null }; "
+                "[PSCustomObject]@{ Esps=$esps; SecureBoot=$sb; BitLocker=$bl } | ConvertTo-Json -Compress -Depth 4"
+            )
+            ps_timeout = 6
         try:
             res = subprocess.run(
                 ["powershell", "-NoProfile", "-Command", ps_cmd],
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=ps_timeout,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             if res.returncode == 0 and res.stdout.strip():
                 payload = json.loads(res.stdout.strip())
                 info["secure_boot_enabled"] = payload.get("SecureBoot")
                 info["bitlocker_protection_on"] = payload.get("BitLocker")
-                esps = payload.get("Esps") or []
-                if isinstance(esps, dict):
-                    esps = [esps]
-                info["esp_candidates"] = esps
-                boot_esps = [e for e in esps if e.get("OnBootDisk") and e.get("Guid")]
-                if len(boot_esps) == 1:
-                    chosen_esp = boot_esps[0]
-                elif len(esps) == 1 and esps[0].get("Guid"):
-                    chosen_esp = esps[0]
-                else:
-                    chosen_esp = boot_esps[0] if boot_esps else None
-                    if len(esps) > 1:
-                        info["esp_ambiguous"] = True
-                if chosen_esp:
-                    info["esp_guid"] = str(chosen_esp["Guid"])
-                    info["esp_part_num"] = int(chosen_esp.get("PartitionNumber") or 0)
-                    info["esp_disk_part"] = f"Disk {chosen_esp.get('DiskNumber')}, Part {chosen_esp.get('PartitionNumber')}"
+                if not esps:
+                    ps_esps = payload.get("Esps") or []
+                    if isinstance(ps_esps, dict):
+                        ps_esps = [ps_esps]
+                    esps = ps_esps
         except Exception:
             pass
+
+        info["esp_candidates"] = esps
+        boot_esps = [e for e in esps if e.get("OnBootDisk") and e.get("Guid")]
+        if len(boot_esps) == 1:
+            chosen_esp = boot_esps[0]
+        elif len(esps) == 1 and esps[0].get("Guid"):
+            chosen_esp = esps[0]
+        else:
+            chosen_esp = boot_esps[0] if boot_esps else (esps[0] if esps else None)
+            if len(esps) > 1:
+                info["esp_ambiguous"] = True
+        if chosen_esp and chosen_esp.get("Guid"):
+            info["esp_guid"] = str(chosen_esp["Guid"])
+            info["esp_part_num"] = int(chosen_esp.get("PartitionNumber") or 0)
+            info["esp_disk_part"] = f"Disk {chosen_esp.get('DiskNumber')}, Part {chosen_esp.get('PartitionNumber')}"
+        else:
+            info["esp_guid"] = "AUTO"
+            info["esp_part_num"] = 0
+            info["esp_disk_part"] = "AUTO (UEFI scan)" 
 
     return info
 
@@ -1380,24 +1416,34 @@ def run_live_cli_verification(log_fn: Callable[[str], None] = print) -> dict[str
 
     raw_ps = ""
     if sys.platform.startswith("win"):
-        ps_query = (
-            "Get-Partition | Where-Object { $_.GptType -eq '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' } | "
-            "Select-Object DiskNumber, PartitionNumber, Guid"
-        )
         log_fn("-" * 76)
-        log_fn(f"[CLI CHECK 2/2] PS> {ps_query}")
-        try:
-            res_ps = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", ps_query],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        win32_esps = _detect_windows_esp_win32()
+        if win32_esps:
+            lines_esp = [
+                f"DiskNumber={e.get('DiskNumber')} PartitionNumber={e.get('PartitionNumber')} Guid={e.get('Guid')} OnBootDisk={e.get('OnBootDisk')}"
+                for e in win32_esps
+            ]
+            raw_ps = "\n".join(lines_esp)
+            log_fn("[CLI CHECK 2/2] Win32 IOCTL_DISK_GET_DRIVE_LAYOUT_EX / Partition Scan:")
+            log_fn(raw_ps)
+        else:
+            ps_query = (
+                "Get-Partition | Where-Object { $_.GptType -eq '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' } | "
+                "Select-Object DiskNumber, PartitionNumber, Guid"
             )
-            raw_ps = (res_ps.stdout or res_ps.stderr).strip()
-            log_fn(raw_ps if raw_ps else "(no GPT EFI System Partition found)")
-        except Exception as exc:
-            log_fn(f"[WARN] PowerShell query error: {exc}")
+            log_fn(f"[CLI CHECK 2/2] PS> {ps_query}")
+            try:
+                res_ps = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", ps_query],
+                    capture_output=True,
+                    text=True,
+                    timeout=6,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                raw_ps = (res_ps.stdout or res_ps.stderr).strip()
+                log_fn(raw_ps if raw_ps else "(no GPT EFI System Partition found; AUTO UEFI scan will be used)")
+            except Exception as exc:
+                log_fn(f"[INFO] PowerShell Get-Partition unavailable ({exc}); AUTO UEFI ESP scan enabled.")
     log_fn("=" * 76)
     return {"command": smi_cmd_str, "raw_smi": raw_smi, "raw_ps": raw_ps, "gpus": parsed_gpus}
 
@@ -1573,6 +1619,241 @@ def _query_win32_device_storage_info(device_path: str, kernel32: Any) -> dict[st
         except Exception:
             pass
     return info
+
+
+_ESP_TYPE_GUID_LE: bytes = b"\x28\x73\x2a\xc1\x1f\xf8\xd2\x11\xba\x4b\x00\xa0\xc9\x3e\xc9\x3b"
+
+
+def _packed_bytes_to_guid_str(raw16: bytes) -> str:
+    """Convert a 16-byte mixed-endian Microsoft/UEFI GUID buffer into '{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}'."""
+    if len(raw16) != 16 or raw16 == b"\x00" * 16:
+        return ""
+    d1, d2, d3, *d4 = struct.unpack("<IHH8B", raw16)
+    tail = "".join(f"{b:02x}" for b in d4[2:])
+    return f"{{{d1:08x}-{d2:04x}-{d3:04x}-{d4[0]:02x}{d4[1]:02x}-{tail}}}"
+
+
+def _query_win32_volume_esp_info(vol_device_path: str, kernel32: Any, boot_disk_num: int) -> dict[str, Any] | None:
+    """Query IOCTL_DISK_GET_PARTITION_INFO_EX (0x00070048, FILE_ANY_ACCESS) and IOCTL_STORAGE_GET_DEVICE_NUMBER
+    on a volume handle (with dwDesiredAccess=0, no Admin rights needed) to check if it is a GPT EFI System Partition."""
+    FILE_SHARE_RW = 0x00000001 | 0x00000002
+    OPEN_EXISTING = 3
+    IOCTL_DISK_GET_PARTITION_INFO_EX = 0x00070048
+    IOCTL_STORAGE_GET_DEVICE_NUMBER = 0x002D1080
+
+    handle = kernel32.CreateFileW(
+        ctypes.c_wchar_p(vol_device_path),
+        0,
+        FILE_SHARE_RW,
+        None,
+        OPEN_EXISTING,
+        0,
+        None,
+    )
+    if handle in (-1, 0, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
+        return None
+    try:
+        pbuf = ctypes.create_string_buffer(256)
+        bytes_ret = ctypes.c_uint32(0)
+        ok_part = kernel32.DeviceIoControl(
+            handle,
+            IOCTL_DISK_GET_PARTITION_INFO_EX,
+            None,
+            0,
+            pbuf,
+            ctypes.sizeof(pbuf),
+            ctypes.byref(bytes_ret),
+            None,
+        )
+        if not ok_part or bytes_ret.value < 64:
+            return None
+        raw = pbuf.raw[: bytes_ret.value]
+        part_style = struct.unpack_from("<I", raw, 0)[0]
+        if part_style != 1:  # 1 == PARTITION_STYLE_GPT
+            return None
+        part_num = int(struct.unpack_from("<I", raw, 24)[0])
+        part_type = raw[32:48]
+        if part_type != _ESP_TYPE_GUID_LE:
+            return None
+        guid_str = _packed_bytes_to_guid_str(raw[48:64])
+        if not guid_str:
+            return None
+
+        disk_num = -1
+        nbuf = ctypes.create_string_buffer(16)
+        nret = ctypes.c_uint32(0)
+        if kernel32.DeviceIoControl(
+            handle,
+            IOCTL_STORAGE_GET_DEVICE_NUMBER,
+            None,
+            0,
+            nbuf,
+            ctypes.sizeof(nbuf),
+            ctypes.byref(nret),
+            None,
+        ) and nret.value >= 12:
+            _dt, dnum, _pnum = struct.unpack_from("<III", nbuf.raw, 0)
+            if dnum != 0xFFFFFFFF:
+                disk_num = int(dnum)
+
+        on_boot = (disk_num == boot_disk_num) if boot_disk_num >= 0 else (disk_num == 0)
+        return {
+            "DiskNumber": disk_num if disk_num >= 0 else 0,
+            "PartitionNumber": part_num,
+            "Guid": guid_str,
+            "OnBootDisk": bool(on_boot),
+        }
+    except Exception:
+        return None
+    finally:
+        try:
+            kernel32.CloseHandle(handle)
+        except Exception:
+            pass
+
+
+def _detect_windows_esp_win32() -> list[dict[str, Any]]:
+    """Fast (<1ms), zero-PowerShell, zero-Admin Win32 IOCTL detection of GPT EFI System Partitions.
+    Uses IOCTL_DISK_GET_DRIVE_LAYOUT_EX (0x00070050, FILE_ANY_ACCESS) on PhysicalDrive0..15,
+    falling back to FindFirstVolumeW/FindNextVolumeW + IOCTL_DISK_GET_PARTITION_INFO_EX (0x00070048)
+    and mountvol.exe volume enumeration."""
+    candidates: list[dict[str, Any]] = []
+    seen_guids: set[str] = set()
+    windll = getattr(ctypes, "windll", None)
+    if windll is None or not hasattr(windll, "kernel32"):
+        return candidates
+
+    kernel32 = windll.kernel32
+    FILE_SHARE_RW = 0x00000001 | 0x00000002
+    OPEN_EXISTING = 3
+    IOCTL_DISK_GET_DRIVE_LAYOUT_EX = 0x00070050
+
+    try:
+        old_err_mode = kernel32.SetErrorMode(0x0001 | 0x8000)
+    except Exception:
+        old_err_mode = 0
+
+    try:
+        sys_drive = os.environ.get("SystemDrive", "C:").rstrip("\\/:").upper() or "C"
+        c_info = _query_win32_device_storage_info(f"\\\\.\\{sys_drive}:", kernel32)
+        boot_disk_num = int(c_info.get("disk_number", -1))
+
+        disk_order: list[int] = []
+        if boot_disk_num >= 0:
+            disk_order.append(boot_disk_num)
+        for d in range(16):
+            if d not in disk_order:
+                disk_order.append(d)
+
+        # Layer 1A: PhysicalDriveN layout table via IOCTL_DISK_GET_DRIVE_LAYOUT_EX (FILE_ANY_ACCESS)
+        for dnum in disk_order:
+            handle = kernel32.CreateFileW(
+                ctypes.c_wchar_p(f"\\\\.\\PhysicalDrive{dnum}"),
+                0,
+                FILE_SHARE_RW,
+                None,
+                OPEN_EXISTING,
+                0,
+                None,
+            )
+            if handle in (-1, 0, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
+                continue
+            try:
+                lbuf = ctypes.create_string_buffer(16384)
+                bytes_ret = ctypes.c_uint32(0)
+                ok = kernel32.DeviceIoControl(
+                    handle,
+                    IOCTL_DISK_GET_DRIVE_LAYOUT_EX,
+                    None,
+                    0,
+                    lbuf,
+                    ctypes.sizeof(lbuf),
+                    ctypes.byref(bytes_ret),
+                    None,
+                )
+                if not ok or bytes_ret.value < 48:
+                    continue
+                raw = lbuf.raw[: bytes_ret.value]
+                part_style, part_count = struct.unpack_from("<II", raw, 0)
+                if part_style != 1:  # 1 == PARTITION_STYLE_GPT
+                    continue
+                max_entries = min(int(part_count), (len(raw) - 48) // 144)
+                for idx in range(max_entries):
+                    off = 48 + idx * 144
+                    entry_style = struct.unpack_from("<I", raw, off)[0]
+                    if entry_style != 1:
+                        continue
+                    part_num = int(struct.unpack_from("<I", raw, off + 24)[0])
+                    part_type = raw[off + 32 : off + 48]
+                    if part_type != _ESP_TYPE_GUID_LE:
+                        continue
+                    guid_str = _packed_bytes_to_guid_str(raw[off + 48 : off + 64])
+                    if guid_str and guid_str.lower() not in seen_guids:
+                        seen_guids.add(guid_str.lower())
+                        on_boot = (dnum == boot_disk_num) if boot_disk_num >= 0 else (dnum == 0)
+                        candidates.append({
+                            "DiskNumber": dnum,
+                            "PartitionNumber": part_num,
+                            "Guid": guid_str,
+                            "OnBootDisk": bool(on_boot),
+                        })
+            except Exception:
+                pass
+            finally:
+                try:
+                    kernel32.CloseHandle(handle)
+                except Exception:
+                    pass
+
+        # Layer 1B: FindFirstVolumeW / FindNextVolumeW + IOCTL_DISK_GET_PARTITION_INFO_EX (FILE_ANY_ACCESS)
+        if not candidates:
+            vbuf = ctypes.create_unicode_buffer(261)
+            find_handle = kernel32.FindFirstVolumeW(vbuf, 260)
+            if find_handle not in (-1, 0, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
+                try:
+                    while True:
+                        vol_str = (vbuf.value or "").strip().rstrip("\\")
+                        if vol_str.startswith("\\?\Volume"):
+                            cand = _query_win32_volume_esp_info(vol_str, kernel32, boot_disk_num)
+                            if cand and cand["Guid"].lower() not in seen_guids:
+                                seen_guids.add(cand["Guid"].lower())
+                                candidates.append(cand)
+                        if not kernel32.FindNextVolumeW(find_handle, vbuf, 260):
+                            break
+                finally:
+                    try:
+                        kernel32.FindVolumeClose(find_handle)
+                    except Exception:
+                        pass
+
+        # Layer 1C: mountvol.exe volume enumeration + IOCTL_DISK_GET_PARTITION_INFO_EX
+        if not candidates:
+            mountvol_exe = r"C:\Windows\System32\mountvol.exe"
+            if not Path(mountvol_exe).exists():
+                mountvol_exe = shutil.which("mountvol") or "mountvol"
+            res_mv = subprocess.run(
+                [mountvol_exe],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if res_mv.returncode == 0 and res_mv.stdout:
+                for m in re.finditer(r"(\\\?\\Volume\{[0-9a-fA-F\-]+\})", res_mv.stdout):
+                    vol_str = m.group(1).rstrip("\\")
+                    cand = _query_win32_volume_esp_info(vol_str, kernel32, boot_disk_num)
+                    if cand and cand["Guid"].lower() not in seen_guids:
+                        seen_guids.add(cand["Guid"].lower())
+                        candidates.append(cand)
+    except Exception:
+        pass
+    finally:
+        try:
+            kernel32.SetErrorMode(old_err_mode)
+        except Exception:
+            pass
+
+    return candidates
 
 
 def _list_usb_drives_win32() -> tuple[list[dict[str, Any]], bool]:
@@ -1822,6 +2103,116 @@ def list_usb_drives() -> list[dict[str, Any]]:
     merged.sort(key=lambda d: (0 if d.get("is_fat32") else 1, d["letter"]))
     return merged
 
+def _verify_single_usb_drive_root(usb_root: Path) -> dict[str, Any] | None:
+    """Directly inspect a single Windows drive root via Win32 APIs as a fallback when general enumeration misses it."""
+    if not sys.platform.startswith("win"):
+        return None
+    raw_drive = usb_root.drive.rstrip(":\\/").upper()
+    if len(raw_drive) != 1 or not raw_drive.isalpha():
+        norm = re.sub(r"^\\\\\?\\", "", str(usb_root)).rstrip("\\/")
+        if len(norm) == 2 and norm[0].isalpha() and norm[1] == ":":
+            raw_drive = norm[0].upper()
+        else:
+            return None
+
+    sys_drive = os.environ.get("SystemDrive", "C:").rstrip("\\/:").upper() or "C"
+    if raw_drive in ("C", sys_drive):
+        return None
+
+    root_w = f"{raw_drive}:\\"
+    root_path = Path(root_w)
+    if _is_windows_system_or_esp_root(root_path):
+        return None
+
+    windll = getattr(ctypes, "windll", None)
+    if windll is None or not hasattr(windll, "kernel32"):
+        return None
+    kernel32 = windll.kernel32
+    try:
+        old_err_mode = kernel32.SetErrorMode(0x0001 | 0x8000)
+    except Exception:
+        old_err_mode = 0
+
+    try:
+        dt_code = int(kernel32.GetDriveTypeW(ctypes.c_wchar_p(root_w)))
+        if dt_code not in (2, 3):
+            return None
+
+        c_info = _query_win32_device_storage_info(f"\\\\.\\{sys_drive}:", kernel32)
+        boot_disk_num = c_info.get("disk_number", -1)
+
+        st_info = _query_win32_device_storage_info(f"\\\\.\\{raw_drive}:", kernel32)
+        disk_num = st_info.get("disk_number", -1)
+        bus_type = st_info.get("bus_type", "")
+        removable_media = bool(st_info.get("removable_media", False))
+        if not bus_type and disk_num >= 0:
+            phys_info = _query_win32_device_storage_info(f"\\\\.\\PhysicalDrive{disk_num}", kernel32)
+            bus_type = phys_info.get("bus_type", "")
+            removable_media = removable_media or bool(phys_info.get("removable_media", False))
+            if not st_info.get("hw_model") and phys_info.get("hw_model"):
+                st_info["hw_model"] = phys_info["hw_model"]
+
+        vol_buf = ctypes.create_unicode_buffer(261)
+        fs_buf = ctypes.create_unicode_buffer(261)
+        serial = ctypes.c_uint32(0)
+        max_comp = ctypes.c_uint32(0)
+        fs_flags = ctypes.c_uint32(0)
+        vol_ok = bool(
+            kernel32.GetVolumeInformationW(
+                ctypes.c_wchar_p(root_w),
+                vol_buf,
+                261,
+                ctypes.byref(serial),
+                ctypes.byref(max_comp),
+                ctypes.byref(fs_flags),
+                fs_buf,
+                261,
+            )
+        )
+        total_bytes = ctypes.c_ulonglong(0)
+        space_ok = bool(
+            kernel32.GetDiskFreeSpaceExW(
+                ctypes.c_wchar_p(root_w),
+                None,
+                ctypes.byref(total_bytes),
+                None,
+            )
+        )
+        if not vol_ok and not space_ok:
+            return None
+
+        dtype = "Removable" if (dt_code == 2 or removable_media) else "Fixed"
+        norm_fs, is_fat32 = _normalize_filesystem(fs_buf.value if vol_ok else "RAW")
+        is_usb_bus = bus_type in ("USB", "SD", "MMC")
+        is_removable = dtype == "Removable"
+
+        if disk_num >= 0 and disk_num == boot_disk_num and not (is_usb_bus or is_removable):
+            return None
+        if not (is_removable or is_usb_bus or is_fat32):
+            return None
+
+        size_gb = round(total_bytes.value / (1024**3), 1) if space_ok else 0.0
+        effective_bus = bus_type if bus_type else ("USB" if (is_removable or is_fat32) else "")
+        label = (vol_buf.value.strip() if vol_ok else "") or st_info.get("hw_model") or "USB_DRIVE"
+        return _format_usb_drive_entry(
+            dl=raw_drive,
+            label=label,
+            fs=norm_fs,
+            dtype=dtype,
+            bus_type=effective_bus,
+            size_gb=size_gb,
+            unique_id=f"SERIAL:{serial.value:08X}" if serial.value else "",
+            disk_number=disk_num,
+        )
+    except Exception:
+        return None
+    finally:
+        try:
+            kernel32.SetErrorMode(old_err_mode)
+        except Exception:
+            pass
+
+
 def _is_reparse_or_symlink(path: Path) -> bool:
     """Check if path is a symlink, junction, or Windows reparse point.
     Return False ONLY when the path does not exist (FileNotFoundError); fail closed (True) on other OSErrors."""
@@ -1870,11 +2261,40 @@ def _write_verified_file(dest: Path, data: bytes, expected_sha256: str) -> None:
     fd, tmp_name = tempfile.mkstemp(prefix=dest.name + ".", suffix=".stage", dir=str(dest.parent))
     tmp_path = Path(tmp_name)
     try:
+        mv = memoryview(data)
+        chunk_sz = 4 * 1024 * 1024
         with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
+            for offset in range(0, len(mv), chunk_sz):
+                fh.write(mv[offset : offset + chunk_sz])
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp_path, dest)
+
+        if dest.exists() and not _is_reparse_or_symlink(dest):
+            try:
+                os.chmod(dest, 0o666)
+            except OSError:
+                pass
+
+        last_err: Exception | None = None
+        for attempt in range(6):
+            try:
+                os.replace(tmp_path, dest)
+                last_err = None
+                break
+            except PermissionError as exc:
+                last_err = exc
+                if attempt == 3 and dest.exists() and not _is_reparse_or_symlink(dest):
+                    try:
+                        os.chmod(dest, 0o666)
+                        dest.unlink()
+                    except OSError:
+                        pass
+                time.sleep(0.05 * (attempt + 1))
+            except OSError as exc:
+                last_err = exc
+                time.sleep(0.05 * (attempt + 1))
+        if last_err is not None:
+            raise last_err
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -2111,6 +2531,8 @@ def build_and_stage_usb(
             None,
         )
         if matched_drive is None:
+            matched_drive = _verify_single_usb_drive_root(usb_root)
+        if matched_drive is None:
             raise ValueError(
                 f"Target '{usb_root}' is not a verified removable USB/SD drive. "
                 "Use 'export' mode to stage into a local folder."
@@ -2176,7 +2598,7 @@ def build_and_stage_usb(
         log_fn(
             f"[OK] Validated profile: GPU={validated['gpu_name']} ({validated['die_name']}, tier={validated['support_tier']}) "
             f"BDF={validated['seg']:04x}:{validated['bus']:02x}:{validated['dev']:02x}.{validated['func']} "
-            f"PCI=0x{validated['board_id']:08x} SUBSYS=0x{validated['subsys_id']:08x}"
+            f"PCI=0x{validated['board_id']:08x} SUBSYS=0x{validated['subsys_id']:08x} ESP={validated['esp_guid']}"
         )
 
         # Pass --clang and --linker explicitly to build.py

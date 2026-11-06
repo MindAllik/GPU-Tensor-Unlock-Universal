@@ -30,7 +30,23 @@ static EFI_STATUS MakeWindowsPath(VOID) {
   b[off+node]=END_DEVICE_PATH_TYPE;b[off+node+1]=END_ENTIRE_DEVICE_PATH_SUBTYPE;b[off+node+2]=4;
   WindowsDevicePath=(VOID*)b;return EFI_SUCCESS;
 }
-/* Select only the existing Windows ESP queried from this local machine. */
+static EFI_STATUS ProbeWindowsBootVolume(EFI_HANDLE Handle,UINTN *Found) {
+  EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs=NULL;EFI_FILE_PROTOCOL *root=NULL,*file=NULL;
+  EFI_STATUS s=EFI_SUCCESS,x=Gu.bs->HandleProtocol(Handle,&FsGuid,(VOID**)&fs);
+  if(!EFI_ERROR(x)&&fs)x=fs->OpenVolume(fs,&root);
+  if(EFI_ERROR(x)||!root)return EFI_DEVICE_ERROR;
+  x=root->Open(root,&file,(CHAR16*)WindowsPath,EFI_FILE_MODE_READ,0);
+  if(!EFI_ERROR(x)&&file) {
+    UINT8 mz[2];UINTN bytes=2;EFI_STATUS y=file->Read(file,&bytes,mz);
+    EFI_STATUS closed=file->Close(file);
+    if(EFI_ERROR(y)||EFI_ERROR(closed)||bytes!=2||mz[0]!='M'||mz[1]!='Z')s=EFI_COMPROMISED_DATA;
+    else {(*Found)++;WindowsVolume=Handle;}
+  } else if(x!=EFI_NOT_FOUND)s=EFI_DEVICE_ERROR;
+  x=root->Close(root);if(EFI_ERROR(x))s=x;
+  return s;
+}
+/* Select the Windows ESP queried from this local machine, with automatic non-boot
+   volume scan fallback when KOH_WINDOWS_ESP_GUID is AUTO (all-zero) or changed. */
 static EFI_STATUS PreloadWindows(VOID) {
   EFI_HANDLE *h=NULL;UINTN n=0,found=0;
   EFI_STATUS s=Gu.bs->LocateHandleBuffer(ByProtocol,&FsGuid,NULL,&n,&h);
@@ -38,19 +54,15 @@ static EFI_STATUS PreloadWindows(VOID) {
   if(!h||n>256){GuFree(h);return EFI_COMPROMISED_DATA;}
   for(UINTN i=0;i<n;i++) {
     if(!GuLocalEsp(h[i]))continue;
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs=NULL;EFI_FILE_PROTOCOL *root=NULL,*file=NULL;
-    EFI_STATUS x=Gu.bs->HandleProtocol(h[i],&FsGuid,(VOID**)&fs);
-    if(!EFI_ERROR(x)&&fs)x=fs->OpenVolume(fs,&root);
-    if(EFI_ERROR(x)||!root){s=EFI_DEVICE_ERROR;break;}
-    x=root->Open(root,&file,(CHAR16*)WindowsPath,EFI_FILE_MODE_READ,0);
-    if(!EFI_ERROR(x)&&file) {
-      UINT8 mz[2];UINTN bytes=2;EFI_STATUS y=file->Read(file,&bytes,mz);
-      EFI_STATUS closed=file->Close(file);
-      if(EFI_ERROR(y)||EFI_ERROR(closed)||bytes!=2||mz[0]!='M'||mz[1]!='Z')s=EFI_COMPROMISED_DATA;
-      else {found++;WindowsVolume=h[i];}
-    } else if(x!=EFI_NOT_FOUND)s=EFI_DEVICE_ERROR;
-    x=root->Close(root);if(EFI_ERROR(x))s=x;
+    s=ProbeWindowsBootVolume(h[i],&found);
     if(EFI_ERROR(s))break;
+  }
+  if(!EFI_ERROR(s) && found==0) {
+    for(UINTN i=0;i<n;i++) {
+      if(GuLocalEsp(h[i]) || GuIsBootVolume(h[i]))continue;
+      s=ProbeWindowsBootVolume(h[i],&found);
+      if(EFI_ERROR(s))break;
+    }
   }
   GuFree(h);GuLog("Windows candidates=%zu status=%#llx\n",(size_t)found,(unsigned long long)s);
   if(EFI_ERROR(s))return s;
@@ -97,9 +109,10 @@ static EFI_STATUS RestoreDisplayForWindows(EFI_HANDLE Driver) {
   s=GuRefreshTargetPci();if(EFI_ERROR(s))return s;
   ExpectDetached=FALSE;
   if(!DisplayCheck())return EFI_DEVICE_ERROR;
-  UINT16 command=0;UINT32 value=0;
+  UINT16 command=0,expected_cmd=(UINT16)InitialConfig[1];UINT32 value=0;
   s=GuConfigRead(EfiPciIoWidthUint16,4,&command);
-  if(EFI_ERROR(s)||command!=(UINT16)InitialConfig[1]||(command&4))return EFI_DEVICE_ERROR;
+  BOOLEAN cmd_ok=InitialBootBme?((command&~4U)==(expected_cmd&~4U)):(command==expected_cmd && !(command&4));
+  if(EFI_ERROR(s)||!cmd_ok)return EFI_DEVICE_ERROR;
   for(UINT32 offset=0x10;offset<=0x24;offset+=4) {
     s=GuConfigRead(EfiPciIoWidthUint32,offset,&value);
     if(EFI_ERROR(s)||value!=InitialConfig[offset/4])return EFI_DEVICE_ERROR;
