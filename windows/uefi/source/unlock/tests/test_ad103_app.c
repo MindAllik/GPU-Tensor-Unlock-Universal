@@ -673,7 +673,10 @@ int main(int argc,char **argv) {
       *(UINT32*)(config+0x80)=0x00005937;
     }
     if(sb==107) {
-      /* XFX/PNY RTX 3090 24GB hardware PCI snapshot: UEFI GOP starts with BME=1 (0x00100007) and 32-bit BAR0 (0xfb000000). */
+      /* XFX/PNY RTX 3090 24GB hardware PCI + NV_PMC_BOOT_0 snapshot:
+         UEFI GOP starts with BME=1 (0x00100007), 32-bit BAR0 (0xfb000000),
+         and NV_PMC_BOOT_0 bits 31:29 = 101b (0xa0000000 foundry strap -> 0xb72000a1 on GA102). */
+      registers[0]=(0xa0000000U | GU_BOARD_CHIP);
       *(UINT32*)(config+4)=0x00100007;
       *(UINT32*)(config+0x10)=0xfb000000;*(UINT32*)(config+0x14)=0xd000000c;
       *(UINT32*)(config+0x18)=0x00000000;*(UINT32*)(config+0x1c)=0xe000000c;

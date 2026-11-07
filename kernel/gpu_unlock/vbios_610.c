@@ -319,7 +319,7 @@ int gpu_unlock_fwsec_patch_frts(u8 *image, const struct gpu_unlock_fwsec *fw, u6
 	GU_NOTE("FWSEC mapper: version=%u size=%u cmd_offset=%#x cmd_size=%u\n",
 		r16(mapper+4), r16(mapper+6), r32(mapper+8), r32(mapper+12));
 	/* Only the audited V3 DMEMMAPPER layout with "DMAP" signature is supported. */
-	if (r16(mapper + 4) != 3 || r16(mapper + 6) < 64)
+	if ((r32(mapper) && r32(mapper) != 0x50414d44u) || r16(mapper + 4) != 3 || r16(mapper + 6) < 64)
 		return GU_DIAG(-EOPNOTSUPP);
 	cmd_off = r32(mapper + 8);
 	cmd_size = r32(mapper + 12);

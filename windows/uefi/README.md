@@ -7,7 +7,7 @@ GPL-2.0-only UEFI application derived from `TOTORONG/AD103_win_unlocker`
 
 Supports automatic board profile generation from `Windows_Launch_UI.bat`
 (`core_detector.py`) as well as standalone command-line builds for Ada Lovelace
-(`AD10x`) and Ampere (`GA10x`). Adaptations cover workstation enumeration/BARs,
+(`AD10x`), Ampere (`GA10x`), and Turing (`TU10x`). Adaptations cover workstation enumeration/BARs,
 inactive GOP children, full preflight logging, two-phase `PromCheck` before GOP
 disconnect, strict selectors and effective readout, and Secure Boot policy.
 
@@ -25,7 +25,7 @@ execution build, `Windows_Launch_UI.bat` (or manual editing of
 board profile and Windows ESP GUID initializer and invokes `build.py --enable-experiment`.
 Output: `source/build/BOOTX64.EFI`. Firmware hashes and names are pinned in `app_io.c`.
 
-Offline sanitizer self-test suite (`43` core transaction scenarios + `63` UEFI
+Offline sanitizer self-test suite (`43` core transaction scenarios + `64` UEFI
 application/topology scenarios under `gcc -fsanitize=address,undefined`):
 
 ```sh

@@ -105,20 +105,22 @@ extern GU_PLATFORM Gu;
 static inline BOOLEAN GuValidArchChip(UINT32 Chip) {
   if (Chip == 0U || (Chip & 0xffff0000U) == 0xbadf0000U || Chip == 0xffffffffU)
     return FALSE;
-  if (Chip == GU_BOARD_CHIP) return TRUE;
+  /* NV_PMC_BOOT_0 (BAR0 + 0x0):
+   *   bits 31:29 = Foundry / silicon process strap (e.g. 101b = 0xa0000000 on Samsung 8N Ampere,
+   *                making GA102 read 0xb72000a1 instead of 0x172000a1).
+   *   bits 28:20 = ARCHITECTURE (28:24) : IMPLEMENTATION (23:20) = 9-bit chip ID (0x162..0x197).
+   *   bits  7:0  = MAJOR_REVISION (7:4) : MINOR_REVISION (3:0) (0xa1, etc.). */
+  if (((Chip ^ GU_BOARD_CHIP) & 0x1ff000ffU) == 0U) return TRUE;
 #if GU_ALLOW_ARCH_CHIP_FAMILY
+  UINT32 arch = (Chip >> 20) & 0x1ffU;
+  UINT32 rev_hi = Chip & 0xf0U;
+  if (rev_hi != 0xa0U && rev_hi != 0xb0U) return FALSE;
 #if defined(GU_ARCH_TURING) && GU_ARCH_TURING
-  UINT32 arch = (Chip >> 20) & 0xfffU;
-  return ((Chip & 0xf0U) == 0xa0U) &&
-         (arch == 0x162U || arch == 0x164U || arch == 0x166U);
+  return (arch == 0x162U || arch == 0x164U || arch == 0x166U);
 #elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
-  UINT32 arch = (Chip >> 20) & 0xfffU;
-  return ((Chip & 0xf0U) == 0xa0U) &&
-         (arch == 0x192U || arch == 0x193U || arch == 0x194U || arch == 0x196U || arch == 0x197U);
+  return (arch == 0x192U || arch == 0x193U || arch == 0x194U || arch == 0x196U || arch == 0x197U);
 #else
-  UINT32 arch = (Chip >> 20) & 0xfffU;
-  return ((Chip & 0xf0U) == 0xa0U) &&
-         (arch == 0x172U || arch == 0x173U || arch == 0x174U || arch == 0x176U || arch == 0x177U);
+  return (arch == 0x172U || arch == 0x173U || arch == 0x174U || arch == 0x176U || arch == 0x177U);
 #endif
 #else
   return FALSE;
@@ -142,7 +144,7 @@ static inline GU_COLD_STATE GuClassifyColdState(UINT32 Plm, UINT32 Ss0, UINT32 S
   if (Plm == 0xffffffffU && ss0_unlocked && ss1_unlocked) {
     return GU_COLD_ALREADY_MODIFIED;
   }
-  if (ss0_unlocked || ss1_unlocked || (Ss0 & 0x88888888U) != 0U || (Ss1 & ~7U) != 0U) {
+  if (ss0_unlocked || ss1_unlocked) {
     return GU_COLD_PARTIALLY_MODIFIED;
   }
   /* On AD103 (e.g. RTX 4080 / 4070 Ti SUPER) and some Turing/Ampere boards,

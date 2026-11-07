@@ -599,7 +599,7 @@ static int load_booter(struct unlock_transaction_work *work)
 		return GU_RESULT(-EINVAL);
 	/* Only this pinned production BOOT_FROM_HS geometry is implemented. */
 #if defined(GU_ARCH_TURING) && GU_ARCH_TURING
-	if (hdr.ucode_id != 3 || hdr.engine_id != 1 || hdr.num_sigs != 1 ||
+	if ((hdr.ucode_id != 3 && hdr.ucode_id != 13) || hdr.engine_id != 1 || hdr.num_sigs != 1 ||
 	    sig_bytes != GU_BOOTER_SIG_TOTAL || hdr.os_code_off != 0 ||
 	    hdr.os_code_size != 256 || hdr.os_data_off != 34048 ||
 	    hdr.os_data_size != 25088 || hdr.app_code_off != 256 ||
@@ -1384,7 +1384,7 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
  if (read_bar(work,0x1fa824,&saved_lo) || inaccessible(saved_lo) ||
      read_bar(work,0x1fa828,&saved_hi) || inaccessible(saved_hi)) return GU_RESULT(-EIO);
  for(index=0;index<ARRAY_SIZE(plm_targets);index++) {
-  if(read_target_plm(work,plm_targets[index].addr,&plm,(GU_ARCH_ADA?true:(index==0||index==3))))return GU_RESULT(-ENODEV);
+  if(read_target_plm(work,plm_targets[index].addr,&plm,(GU_ARCH_ADA?(index!=1):(index==0||index==3))))return GU_RESULT(-ENODEV);
   dev_info(&work->pdev->dev,"AD102 PLM initial: index=%u target=%s value=%#x expected=%#x\n",index,plm_targets[index].name,plm,plm_targets[index].value);
  }
  dev_info(&work->pdev->dev,"AD102 SINGLE FIRE: WPR_CFG->FBPA->WPR->FEAT inside one SEC2 execution; max_starts=1\n");
@@ -1410,7 +1410,7 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
     read_bar(work,SEC2_BASE+0x94,&debug))return GU_RESULT(-ENODEV);
  work->sec2_halt_verified=!inaccessible(cpuctl) && !!(cpuctl&0x10);
  for(index=0;index<ARRAY_SIZE(plm_targets);index++) {
-  if(read_target_plm(work,plm_targets[index].addr,&plm,(GU_ARCH_ADA?true:(index==0||index==3))))return GU_RESULT(-ENODEV);
+  if(read_target_plm(work,plm_targets[index].addr,&plm,(GU_ARCH_ADA?(index!=1):(index==0||index==3))))return GU_RESULT(-ENODEV);
   dev_info(&work->pdev->dev,"AD102 PLM final: index=%u target=%s value=%#x expected=%#x matched=%u\n",index,plm_targets[index].name,plm,plm_targets[index].value,plm==plm_targets[index].value);
 #if !defined(GU_ARCH_ADA) || GU_ARCH_ADA
   if(plm!=plm_targets[index].value) { all=false; if(index!=1)required=false; }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Self-contained ASan + UBSan verification suite for windows/uefi (M-13).
 Generates synthetic PROM, PCI config, and firmware fixtures on the fly and executes
-all 43 core transaction scenarios and 63 UEFI app/topology scenarios under GCC -fsanitize=address,undefined."""
+all 43 core transaction scenarios and 64 UEFI app/topology scenarios under GCC -fsanitize=address,undefined."""
 
 from pathlib import Path
 import hashlib, re, shutil, struct, subprocess, sys, tempfile
@@ -271,10 +271,12 @@ int main(void) {
     CHECK_TRUE(GU_BOARD_SUBSYSTEM == 0x268819daU);
     CHECK_TRUE(GU_BOARD_CHIP == 0x193000a1U);
 
-    /* Verify GuValidArchChip accepts exact chip and same-family steppings (A1/A2) */
+    /* Verify GuValidArchChip accepts exact chip, foundry strap bits 31:29 (0xa0000000), and same-family steppings */
     CHECK_TRUE(GuValidArchChip(0x193000a1U));
+    CHECK_TRUE(GuValidArchChip(0xb93000a1U));
     CHECK_TRUE(GuValidArchChip(0x193001a2U));
     CHECK_TRUE(!GuValidArchChip(0x172000a1U));
+    CHECK_TRUE(!GuValidArchChip(0xb72000a1U));
     CHECK_TRUE(!GuValidArchChip(0xbadf5040U));
 
     /* Verify GuClassifyColdState accepts AD103 cold state (SS0=0, SS1=0, PLM=0xffffff8f, WPR2_HI=0) */
@@ -342,6 +344,49 @@ int main(void) {
         )
         r_probe = subprocess.run([str(probe_exe)], cwd=src_4080, capture_output=True, text=True, check=True)
         print(r_probe.stdout.strip())
+
+        # 5. Ampere GA102 (RTX 3090 0x220410de / RTX 3080 Ti 20GB 0x220510de) NV_PMC_BOOT_0=0xb72000a1U check
+        probe_3090_c = work / "probe_3090.c"
+        probe_3090_c.write_text("""
+#include "port.h"
+int puts(const char *s);
+void abort(void);
+#define CHECK_TRUE(cond) do { if (!(cond)) abort(); } while (0)
+int main(void) {
+    CHECK_TRUE(GU_ARCH_ADA == 0);
+    CHECK_TRUE(GU_BOARD_CHIP == 0x172000a1U);
+    CHECK_TRUE(GuValidArchChip(0x172000a1U));
+    CHECK_TRUE(GuValidArchChip(0xb72000a1U));
+    CHECK_TRUE(GuValidArchChip(0xb73000a1U));
+    CHECK_TRUE(GuValidArchChip(0xb74000a1U));
+    CHECK_TRUE(GuValidArchChip(0xb76000a1U));
+    CHECK_TRUE(GuValidArchChip(0xb77000a1U));
+    CHECK_TRUE(!GuValidArchChip(0x192000a1U));
+    CHECK_TRUE(!GuValidArchChip(0x162000a1U));
+    puts("Ampere GA10x NV_PMC_BOOT_0 (0xb72000a1 / Samsung 8N strap bits 31:29) validation PASS");
+    return 0;
+}
+""")
+        prof_3090 = work / "prof_3090"
+        prof_3090.mkdir()
+        (prof_3090 / "local_profile.h").write_text("""#pragma once
+#define GU_BOARD_ID 0x220410deU
+#define GU_BOARD_SUBSYSTEM 0x136a196eU
+#define GU_BOARD_CHIP 0x172000a1U
+#define GU_ARCH_ADA 0
+#define GU_ARCH_TURING 0
+""")
+        src_3090 = work / "src_3090"
+        shutil.copytree(src, src_3090)
+        shutil.copy2(prof_3090 / "local_profile.h", src_3090 / "unlock" / "local_profile.h")
+        probe_3090_exe = work / "probe_3090_asan"
+        subprocess.run(
+            ["gcc", f"-I{prof_3090}", *asan_flags, str(probe_3090_c), "-o", str(probe_3090_exe)],
+            cwd=src_3090,
+            check=True,
+        )
+        r_3090 = subprocess.run([str(probe_3090_exe)], cwd=src_3090, capture_output=True, text=True, check=True)
+        print(r_3090.stdout.strip())
         return 0
 
 

@@ -31,9 +31,9 @@ addresses come from [TOTORONG's AD103_win_unlocker](https://huggingface.co/TOTOR
 The TU102 payload reproduces the six-write chain pinned in `turing-610.43.03.json`
 at SHA-256 `54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024`
 (adapted from `Zagitta/gpu-unlock`). It opens `WPR_CFG` (`0x001fa7cc -> 0xfffff0ff`)
-and Turing `FEAT_OVR_PLM` (`0x00409650 -> 0xffffffff`), clears scratch and WPR2,
-writes completion marker `0x67b00001` to `FALCON_MAILBOX0` (`0x00840040`), and
-halts SEC2 cleanly.
+and Turing `FEAT_OVR_PLM` (`0x00409650 -> 0xffffffff`) across six write frames,
+followed by SE/CSB handshake (`0x6521`), cleanup (`0x7f27 -> 0x0ccb`), and
+clean exit (`0x7ea4`).
 
 The manifest records payload offsets separately from DMEM addresses. With the
 modeled copy base `0x600`, the canary at payload `0xf94c` lies at DMEM `0xff4c`,

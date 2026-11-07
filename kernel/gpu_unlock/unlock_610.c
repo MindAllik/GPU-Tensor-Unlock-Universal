@@ -82,7 +82,7 @@ static const struct gpu_unlock_assets *unlock_assets(const struct pci_dev *pdev)
 		.boot = BOOT_FILE_TU102, .desc = BOOT_DESC_FILE_TU102,
 		.payload = V67_FILE_TU102,
 		.signature_section = ".fwsignature_tu10x",
-		.arch = GU_BOOTER_TU10X, .boot_image_size = 24576,
+		.arch = GU_BOOTER_TU10X, .boot_image_size = 16384,
 	};
 
 	if (gu_is_any_turing_id(pdev->device))
@@ -387,7 +387,9 @@ static int ad102_sample_permissions(struct unlock_transaction_work *work,
 
 		values[i] = 0;
 		valid = !read_bar(work, ad102_permissions[i].offset, &values[i]) &&
-			(values[i] & 0xffff0000u) != 0xbadf0000u && accessible;
+			((values[i] & 0xffff0000u) != 0xbadf0000u ||
+			 (!ad102_permissions[i].required && work->pdev->device != GU_AD102_RTX_4090)) &&
+			accessible;
 		dev_info(&work->pdev->dev,
 			 "AD102 permission %s: %s[%#x]=%#x before=%#x expected=%#x required=%u valid=%u pci=%#x chip=%#x\n",
 			 phase, ad102_permissions[i].name, ad102_permissions[i].offset,

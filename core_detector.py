@@ -39,12 +39,14 @@ CHIP_BY_PMC: dict[str, tuple[int, bool]] = {
     "GA103": (0x173000A1, False),
     "GA104": (0x174000A1, False),
     "GA106": (0x176000A1, False),
+    "GA107": (0x177000A1, False),
     "TU102": (0x162000A1, False),
     "TU104": (0x164000A1, False),
     "TU106": (0x166000A1, False),
 }
 
-# Explicit versioned allowlist of desktop Ada Lovelace (AD10x) & Ampere (GA10x) PCI Device IDs.
+# Explicit versioned allowlist of desktop Ada Lovelace (AD10x), Ampere (GA10x) & Turing (TU10x) PCI Device IDs,
+# synchronized with kernel/gpu_unlock/main.c and kernel/gpu_unlock/arch_610.h.
 # Format: dev16 -> (die_name, default_pmc_boot0, is_ada, support_tier, model_name)
 SUPPORT_MATRIX: dict[int, tuple[str, int, bool, str, str]] = {
     # Hardware-tested profiles
@@ -52,52 +54,115 @@ SUPPORT_MATRIX: dict[int, tuple[str, int, bool, str, str]] = {
     0x2782: ("AD104", 0x194000A1, True, "hardware_tested", "GeForce RTX 4070 Ti"),
     0x2204: ("GA102", 0x172000A1, False, "hardware_tested", "GeForce RTX 3090"),
     0x2206: ("GA102", 0x172000A1, False, "hardware_tested", "GeForce RTX 3080"),
-    # Experimental / simulated desktop Ada Lovelace SKUs
+    # Experimental / simulated desktop Ada Lovelace (AD102 / AD103 / AD104 / AD106 / AD107) SKUs
     0x2685: ("AD102", 0x192000A1, True, "experimental_simulated", "GeForce RTX 4090 D"),
     0x2689: ("AD102", 0x192000A1, True, "experimental_simulated", "GeForce RTX 4070 Ti SUPER (AD102)"),
     0x2702: ("AD103", 0x193000A1, True, "experimental_simulated", "GeForce RTX 4080 SUPER"),
+    0x2703: ("AD103", 0x193000A1, True, "experimental_simulated", "GeForce RTX 4080 (AD103-301)"),
     0x2704: ("AD103", 0x193000A1, True, "experimental_simulated", "GeForce RTX 4080"),
     0x2705: ("AD103", 0x193000A1, True, "experimental_simulated", "GeForce RTX 4070 Ti SUPER"),
     0x2709: ("AD103", 0x193000A1, True, "experimental_simulated", "GeForce RTX 4070 (AD103)"),
     0x2783: ("AD104", 0x194000A1, True, "experimental_simulated", "GeForce RTX 4070 SUPER"),
     0x2786: ("AD104", 0x194000A1, True, "experimental_simulated", "GeForce RTX 4070"),
+    0x2788: ("AD104", 0x194000A1, True, "experimental_simulated", "GeForce RTX 4060 Ti (AD104-150)"),
     0x27B0: ("AD104", 0x194000A1, True, "experimental_simulated", "GeForce RTX 4060 Ti (AD104)"),
+    0x27B2: ("AD104", 0x194000A1, True, "experimental_simulated", "GeForce RTX 4070 (AD104-251)"),
     0x2803: ("AD106", 0x196000A1, True, "experimental_simulated", "GeForce RTX 4060 Ti 8GB"),
     0x2805: ("AD106", 0x196000A1, True, "experimental_simulated", "GeForce RTX 4060 Ti 16GB"),
     0x2808: ("AD106", 0x196000A1, True, "experimental_simulated", "GeForce RTX 4060 (AD106)"),
     0x2882: ("AD107", 0x197000A1, True, "experimental_simulated", "GeForce RTX 4060"),
-    # Experimental / simulated desktop Ampere SKUs
+    # Experimental / simulated desktop Ampere GA102 SKUs (including 0x2205 RTX 3080 Ti 20GB GA102-250)
+    0x2200: ("GA102", 0x172000A1, False, "experimental_simulated", "GeForce RTX 3090 Engineering / OEM (GA102)"),
     0x2203: ("GA102", 0x172000A1, False, "experimental_simulated", "GeForce RTX 3090 Ti"),
+    0x2205: ("GA102", 0x172000A1, False, "experimental_simulated", "GeForce RTX 3080 Ti 20GB (GA102-250)"),
     0x2207: ("GA102", 0x172000A1, False, "experimental_simulated", "GeForce RTX 3070 Ti (GA102)"),
     0x2208: ("GA102", 0x172000A1, False, "experimental_simulated", "GeForce RTX 3080 Ti"),
     0x220A: ("GA102", 0x172000A1, False, "experimental_simulated", "GeForce RTX 3080 12GB"),
+    0x220D: ("GA102", 0x172000A1, False, "experimental_simulated", "NVIDIA CMP 90HX"),
     0x2216: ("GA102", 0x172000A1, False, "experimental_simulated", "GeForce RTX 3080 LHR"),
+    0x222B: ("GA102", 0x172000A1, False, "experimental_simulated", "GeForce RTX 3080 OEM (GA102)"),
+    0x222F: ("GA102", 0x172000A1, False, "experimental_simulated", "GeForce RTX 3080 (GA102-222F)"),
+    # Experimental / simulated desktop Ampere GA103 SKUs
     0x2414: ("GA103", 0x173000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti (GA103)"),
+    # Experimental / simulated desktop Ampere GA104 SKUs
+    0x2480: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 Engineering / OEM (GA104)"),
     0x2482: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 Ti"),
+    0x2483: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 (GA104-2483)"),
     0x2484: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070"),
     0x2486: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti"),
     0x2487: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 (GA104)"),
     0x2488: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 LHR"),
     0x2489: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti LHR"),
+    0x248A: ("GA104", 0x174000A1, False, "experimental_simulated", "NVIDIA CMP 70HX"),
+    0x248C: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 Ti (GA104-248C)"),
+    0x248D: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 (GA104-248D)"),
+    0x248E: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti (GA104-248E)"),
+    0x249C: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 OEM (GA104-249C)"),
+    0x249D: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 OEM (GA104-249D)"),
+    0x249F: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 OEM (GA104-249F)"),
+    0x24A0: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 OEM (GA104-24A0)"),
+    0x24A4: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 OEM (GA104-24A4)"),
+    0x24AC: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti OEM (GA104-24AC)"),
+    0x24AD: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti OEM (GA104-24AD)"),
+    0x24AF: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti OEM (GA104-24AF)"),
+    0x24BF: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 OEM (GA104-24BF)"),
+    0x24C0: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3070 Ti (GA104-24C0)"),
+    0x24C7: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti GDDR6X (0x24C7)"),
+    0x24C8: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti GDDR6X (0x24C8)"),
+    0x24C9: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti GDDR6X"),
+    0x24DC: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti OEM (GA104-24DC)"),
+    0x24DD: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti OEM (GA104-24DD)"),
+    0x24DF: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti OEM (GA104-24DF)"),
+    0x24E0: ("GA104", 0x174000A1, False, "experimental_simulated", "GeForce RTX 3060 Ti OEM (GA104-24E0)"),
+    # Experimental / simulated desktop Ampere GA106 SKUs
+    0x2501: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3060 (GA106-2501)"),
     0x2503: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3060"),
     0x2504: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3060 LHR"),
+    0x2505: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3060 (GA106-2505)"),
+    0x2507: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3050 8GB"),
+    0x2508: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3050 OEM"),
+    0x2509: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3050 (GA106-2509)"),
+    0x252F: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3060 OEM (GA106-252F)"),
+    0x2544: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3060 LHR (GA106-2544)"),
+    # Experimental / simulated desktop Ampere GA107 SKUs
+    0x2582: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 3050 8GB (GA107)"),
+    0x2583: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 3050 (GA107-2583)"),
+    0x2584: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 3050 6GB"),
     # Experimental / simulated desktop Turing (RTX 20-series / CMP) SKUs
+    0x1E02: ("TU102", 0x162000A1, False, "experimental_simulated", "NVIDIA TITAN RTX"),
+    0x1E03: ("TU102", 0x162000A1, False, "experimental_simulated", "GeForce RTX 2080 Ti (0x1E03)"),
     0x1E04: ("TU102", 0x162000A1, False, "experimental_simulated", "GeForce RTX 2080 Ti"),
     0x1E07: ("TU102", 0x162000A1, False, "experimental_simulated", "GeForce RTX 2080 Ti Rev. A"),
-    0x1E02: ("TU102", 0x162000A1, False, "experimental_simulated", "NVIDIA TITAN RTX"),
     0x1E09: ("TU102", 0x162000A1, False, "experimental_simulated", "NVIDIA CMP 50HX"),
+    0x1E2D: ("TU102", 0x162000A1, False, "experimental_simulated", "GeForce RTX 2080 Ti OEM (0x1E2D)"),
+    0x1E2E: ("TU102", 0x162000A1, False, "experimental_simulated", "GeForce RTX 2080 Ti OEM (0x1E2E)"),
     0x1E81: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2080 SUPER"),
     0x1E82: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2080"),
-    0x1E87: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2080 Rev. A"),
     0x1E84: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2070 SUPER"),
+    0x1E87: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2080 Rev. A"),
+    0x1E89: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2060 KO (TU104)"),
+    0x1EC2: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2070 SUPER (0x1EC2)"),
+    0x1EC7: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2070 SUPER (0x1EC7)"),
     0x1F02: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2070"),
-    0x1F07: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2070 Rev. A"),
-    0x1F06: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 SUPER"),
-    0x1F47: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 SUPER (TU106)"),
-    0x1F08: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 6GB"),
     0x1F03: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 12GB"),
+    0x1F06: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 SUPER"),
+    0x1F07: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2070 Rev. A"),
+    0x1F08: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 6GB"),
+    0x1F0A: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 (0x1F0A)"),
     0x1F0B: ("TU106", 0x166000A1, False, "experimental_simulated", "NVIDIA CMP 40HX"),
+    0x1F42: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 SUPER (0x1F42)"),
+    0x1F47: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 SUPER (TU106)"),
 }
+
+
+def _enrich_generic_gpu_name(raw_name: str, dev16: int) -> str:
+    """If NVML/nvidia-smi returns a generic placeholder like 'NVIDIA Graphics Device', append the model from SUPPORT_MATRIX."""
+    clean = (raw_name or "").strip()
+    if dev16 in SUPPORT_MATRIX:
+        model_hint = SUPPORT_MATRIX[dev16][4]
+        if not clean or clean.upper() in ("NVIDIA GRAPHICS DEVICE", "NVIDIA GPU", "VGA COMPATIBLE CONTROLLER"):
+            return f"{clean or 'NVIDIA GPU'} [{model_hint}]"
+    return clean or "NVIDIA GPU"
 
 
 def classify_pci_device(device_id_16: int, gpu_name: str = "", sm_version: str = "") -> dict[str, Any]:
@@ -441,17 +506,17 @@ def validate_target_profile(config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(support["reason"])
 
     subsys_id = _parse_hex_int(config.get("subsystem_id_hex", ""), "subsystem_id_hex", 1, 0xFFFFFFFF)
-    chip_id = _parse_hex_int(config.get("chip_id_hex", ""), "chip_id_hex", 0x160000A1, 0x19F000A1)
+    chip_id = _parse_hex_int(config.get("chip_id_hex", ""), "chip_id_hex", 0x160000A1, 0xFFFFFFFF)
     die_name = str(config.get("die_name", "")).strip()
     if die_name not in CHIP_BY_PMC:
         raise ValueError(f"Unsupported die_name: {die_name!r}")
 
-    # Require die_name and chip_id to match the canonical SUPPORT_MATRIX entry for dev16!
+    # Require die_name and 9-bit ARCHITECTURE:IMPLEMENTATION (bits 28:20) + revision (bits 7:0) to match SUPPORT_MATRIX
     if die_name != support["die_name"]:
         raise ValueError(
             f"Die mismatch for PCI Device ID 0x{dev16:04x}: expected {support['die_name']}, got {die_name}"
         )
-    if chip_id != support["chip_id"]:
+    if ((chip_id ^ support["chip_id"]) & 0x1FF000FF) != 0:
         raise ValueError(
             f"Chip ID mismatch for {die_name} (PCI 0x{dev16:04x}): expected {support['chip_id']:#010x}, got {chip_id:#010x}"
         )
@@ -646,7 +711,7 @@ def _query_windows_pnp_gpus() -> list[dict[str, Any]]:
                     dev_num = (addr >> 16) & 0x1F
                     func_num = addr & 0x7
                     results.append({
-                        "gpu_name": item.get("Name") or "NVIDIA GPU",
+                        "gpu_name": _enrich_generic_gpu_name(item.get("Name") or "NVIDIA GPU", dev16),
                         "dev16": dev16,
                         "board_id_hex": f"0x{dev16:04x}10de",
                         "subsystem_id_hex": f"0x{sub32:08x}",
@@ -663,17 +728,24 @@ def _query_windows_pnp_gpus() -> list[dict[str, Any]]:
 
 NOMINAL_VRAM_MIB: dict[int, int] = {
     0x2684: 24564, 0x2685: 24564, 0x2689: 16376,
-    0x2702: 16376, 0x2704: 16380, 0x2705: 16376, 0x2709: 12282,
-    0x2782: 12282, 0x2783: 12282, 0x2786: 12282, 0x27B0: 8188,
+    0x2702: 16376, 0x2703: 16380, 0x2704: 16380, 0x2705: 16376, 0x2709: 12282,
+    0x2782: 12282, 0x2783: 12282, 0x2786: 12282, 0x2788: 8188, 0x27B0: 8188, 0x27B2: 12282,
     0x2803: 8188, 0x2805: 16380, 0x2808: 8188, 0x2882: 8188,
-    0x2203: 24564, 0x2204: 24576, 0x2206: 10240, 0x2207: 8192,
-    0x2208: 12288, 0x220A: 12288, 0x2216: 10240, 0x2414: 8192,
-    0x2482: 8192, 0x2484: 8192, 0x2486: 8192, 0x2487: 12288,
-    0x2488: 8192, 0x2489: 8192, 0x2503: 12288, 0x2504: 12288,
-    0x1E04: 11264, 0x1E07: 11264, 0x1E02: 24576, 0x1E09: 10240,
-    0x1E81: 8192, 0x1E82: 8192, 0x1E87: 8192, 0x1E84: 8192,
-    0x1F02: 8192, 0x1F07: 8192, 0x1F06: 8192, 0x1F47: 8192,
-    0x1F08: 6144, 0x1F03: 12288, 0x1F0B: 8192,
+    0x2200: 24576, 0x2203: 24564, 0x2204: 24576, 0x2205: 20480, 0x2206: 10240, 0x2207: 8192,
+    0x2208: 12288, 0x220A: 12288, 0x220D: 10240, 0x2216: 10240, 0x222B: 10240, 0x222F: 10240,
+    0x2414: 8192,
+    0x2480: 8192, 0x2482: 8192, 0x2483: 8192, 0x2484: 8192, 0x2486: 8192, 0x2487: 12288,
+    0x2488: 8192, 0x2489: 8192, 0x248A: 8192, 0x248C: 8192, 0x248D: 8192, 0x248E: 8192,
+    0x249C: 8192, 0x249D: 8192, 0x249F: 8192, 0x24A0: 8192, 0x24A4: 8192, 0x24AC: 8192,
+    0x24AD: 8192, 0x24AF: 8192, 0x24BF: 8192, 0x24C0: 8192, 0x24C7: 8192, 0x24C8: 8192,
+    0x24C9: 8192, 0x24DC: 8192, 0x24DD: 8192, 0x24DF: 8192, 0x24E0: 8192,
+    0x2501: 12288, 0x2503: 12288, 0x2504: 12288, 0x2505: 12288, 0x2507: 8192, 0x2508: 8192,
+    0x2509: 8192, 0x252F: 12288, 0x2544: 12288,
+    0x2582: 8192, 0x2583: 8192, 0x2584: 6144,
+    0x1E02: 24576, 0x1E03: 11264, 0x1E04: 11264, 0x1E07: 11264, 0x1E09: 10240, 0x1E2D: 11264, 0x1E2E: 11264,
+    0x1E81: 8192, 0x1E82: 8192, 0x1E84: 8192, 0x1E87: 8192, 0x1E89: 6144, 0x1EC2: 8192, 0x1EC7: 8192,
+    0x1F02: 8192, 0x1F03: 12288, 0x1F06: 8192, 0x1F07: 8192, 0x1F08: 6144, 0x1F0A: 6144, 0x1F0B: 8192,
+    0x1F42: 8192, 0x1F47: 8192,
 }
 
 
@@ -694,9 +766,9 @@ def get_linux_modprobe_command_for_gpu(gpu: dict[str, Any]) -> str:
         return f"modprobe gpu_unlock targets={bdf} turing_experimental=1"
     if not cls["is_ada"] or dev16 == 0x2684:
         return f"modprobe gpu_unlock targets={bdf}"
-    if dev16 in (0x2702, 0x2704, 0x2705, 0x2709):
+    if dev16 in (0x2702, 0x2703, 0x2704, 0x2705, 0x2709):
         return f"modprobe gpu_unlock targets={bdf} ad103_experimental=1"
-    if dev16 in (0x2782, 0x2783, 0x2786, 0x27B0):
+    if dev16 in (0x2782, 0x2783, 0x2786, 0x2788, 0x27B0, 0x27B2):
         return f"modprobe gpu_unlock targets={bdf} ad104_experimental=1"
     return f"modprobe gpu_unlock targets={bdf} ada_experimental=1"
 
@@ -718,9 +790,9 @@ def get_linux_boot_option_for_gpu(gpu: dict[str, Any]) -> str:
         return f"gpu_unlock.targets={bdf} gpu_unlock.turing_experimental=1"
     if not cls["is_ada"] or dev16 == 0x2684:
         return f"gpu_unlock.targets={bdf}"
-    if dev16 in (0x2702, 0x2704, 0x2705, 0x2709):
+    if dev16 in (0x2702, 0x2703, 0x2704, 0x2705, 0x2709):
         return f"gpu_unlock.targets={bdf} gpu_unlock.ad103_experimental=1"
-    if dev16 in (0x2782, 0x2783, 0x2786, 0x27B0):
+    if dev16 in (0x2782, 0x2783, 0x2786, 0x2788, 0x27B0, 0x27B2):
         return f"gpu_unlock.targets={bdf} gpu_unlock.ad104_experimental=1"
     return f"gpu_unlock.targets={bdf} gpu_unlock.ada_experimental=1"
 
@@ -911,7 +983,7 @@ def _query_nvidia_smi_gpus(raw_csv: str | None = None) -> tuple[str, list[dict[s
 
             gpus.append({
                 "index": int(idx_s),
-                "gpu_name": name_s,
+                "gpu_name": _enrich_generic_gpu_name(name_s, dev16),
                 "gpu_uuid": uuid_s,
                 "pci_bdf": bdf_norm,
                 "domain": dom,
@@ -1098,6 +1170,7 @@ def detect_host_environment() -> dict[str, Any]:
                                 bound_driver = lg.get("bound_driver", "nvidia")
                                 break
 
+                        gpu_name = _enrich_generic_gpu_name(gpu_name, dev16)
                         cls = classify_pci_device(dev16, gpu_name, sm_ver)
                         bdf_str = f"{pci.domain:04x}:{pci.bus:02x}:{pci.device:02x}.{func_num}"
                         gpu_entry = {
@@ -1270,7 +1343,7 @@ def detect_host_environment() -> dict[str, Any]:
 
     if info["gpus"]:
         chosen = next((g for g in info["gpus"] if g["supported"]), info["gpus"][0])
-        info["gpu_detected"] = bool(chosen["vram_mib"] > 0 and chosen["board_id_hex"] and chosen["subsystem_id_hex"])
+        info["gpu_detected"] = bool(chosen["board_id_hex"] and chosen["subsystem_id_hex"])
         for k in (
             "gpu_name", "gpu_uuid", "pci_bdf", "board_id_hex", "subsystem_id_hex",
             "segment_hex", "bus_hex", "device_hex", "function_hex", "die_name",
@@ -1383,6 +1456,7 @@ def run_live_cli_verification(log_fn: Callable[[str], None] = print) -> dict[str
                     idx_s, name_s, uuid_s, bdf_s, dev_hex, sub_hex, vram_s, vbios_s, pdef_s, pmax_s = parts[:10]
                     dev32 = int(dev_hex, 16) if dev_hex.lower().startswith("0x") else int(dev_hex, 16)
                     dev16 = (dev32 >> 16) & 0xFFFF
+                    name_s = _enrich_generic_gpu_name(name_s, dev16)
                     cls = classify_pci_device(dev16, name_s)
                     vram_mib = int(float(vram_s))
                     low = max(1024, (vram_mib - 1024) & ~0xF)

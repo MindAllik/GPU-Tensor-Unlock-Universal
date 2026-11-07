@@ -59,3 +59,32 @@ class SmRateProbeTests(TestCase):
             with self.assertRaisesRegex(RuntimeError, "status 0x56"):
                 probe.read_rates("GPU-exact", ioctl)
         self.assertEqual(close.call_count, 2)
+
+    def test_multi_gpu_selects_matching_uuid_and_device_index(self):
+        opened_paths = []
+        alloc_devices = []
+
+        def fake_open(path, flags):
+            opened_paths.append(path)
+            return 10 + len(opened_paths)
+
+        def ioctl(fd, code, buffer, mutate):
+            if code == probe.ioctl_number(0x2B, probe.Alloc):
+                p = probe.Alloc.from_buffer(buffer)
+                if p.cls == 0x80:
+                    dev_struct = C.cast(p.params, C.POINTER(probe.Device)).contents
+                    alloc_devices.append(dev_struct.device)
+                p.new = 200 + len(alloc_devices)
+            elif code == probe.ioctl_number(0x2A, probe.Control):
+                p = probe.Control.from_buffer(buffer)
+                rates = C.cast(p.params, C.POINTER(probe.Rates)).contents
+                rates.fmla32 = 0
+
+        with mock.patch.object(probe, "gpu_identity", return_value=["GPU-first, card0", "GPU-second, card1"]), \
+             mock.patch.object(probe.os, "open", side_effect=fake_open), \
+             mock.patch.object(probe.os, "close"):
+            result = probe.read_rates("GPU-second", ioctl)
+        self.assertEqual(opened_paths, ["/dev/nvidiactl", "/dev/nvidia1"])
+        self.assertEqual(alloc_devices, [1])
+        self.assertEqual(result["rates"]["fmla32"], 0)
+        self.assertEqual(result["gpu"], "GPU-second, card1")

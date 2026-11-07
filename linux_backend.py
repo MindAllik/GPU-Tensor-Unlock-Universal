@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Linux Backend for NVIDIA GPU Tensor Unlock (Ada Lovelace & Ampere).
+"""Linux Backend for NVIDIA GPU Tensor Unlock (Ada Lovelace, Ampere & Turing).
 
 Integrates the pre-driver Linux kernel module (gpu_unlock.ko), SHA-256 verified
-NVIDIA 610.43.03 firmware asset generation (both AD102 and GA102 chains),
+NVIDIA 610.43.03 firmware asset generation (AD102, GA102, and TU102 chains),
 DKMS + initramfs (mkinitcpio / initramfs-tools / dracut) staging, kernel log
 (journalctl / dmesg) verification, and direct NVIDIA RM ioctl SM issue-rate
 readbacks (/dev/nvidiactl cmd 0x20801230).
@@ -357,7 +357,7 @@ def build_all_linux_firmware_assets(
     assets_dir: Path | None = None,
     log_fn: Callable[[str], None] = print,
 ) -> Path:
-    """Download/verify NVIDIA 610.43.03 inputs and build all 9 Linux firmware assets (both GA102 and AD102)."""
+    """Download/verify NVIDIA 610.43.03 inputs and build all 14 Linux firmware assets (GA102, AD102, and TU102)."""
     if assets_dir is None:
         assets_dir = Path.home() / ".cache" / "gpu-unlock" / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
@@ -454,10 +454,15 @@ def build_all_linux_firmware_assets(
             core_detector._write_verified_file(gsp_dest, cached_gsp.read_bytes(), exp_gsp_sha)
             log_fn(f"[OK] Staged & verified {gsp_fname} ({exp_gsp_sz:,} bytes)")
 
-    # 4. Stage NVIDIA-LICENSE for Makefile install-firmware compatibility
-    nv_lic_src = APP_ROOT / "licenses" / "NVIDIA-MIT.txt"
-    if nv_lic_src.exists():
-        (assets_dir / "NVIDIA-LICENSE").write_bytes(nv_lic_src.read_bytes())
+    # 4. Stage NVIDIA-LICENSE (NVIDIA Driver License Agreement, SHA-256 c692fb14...) for Makefile install-firmware compatibility
+    for cand_lic in (
+        APP_ROOT / "licenses" / "NVIDIA-driver-COPYING",
+        APP_ROOT / "windows" / "uefi" / "source" / "LICENSES" / "NVIDIA-Driver.txt",
+        APP_ROOT / "licenses" / "NVIDIA-MIT.txt",
+    ):
+        if cand_lic.exists():
+            (assets_dir / "NVIDIA-LICENSE").write_bytes(cand_lic.read_bytes())
+            break
 
     return assets_dir
 

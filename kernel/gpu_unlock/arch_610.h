@@ -14,12 +14,14 @@ enum gpu_unlock_booter_arch {
 
 static inline int gu_is_ad103_exp_id(unsigned short dev)
 {
-	return dev == 0x2702u || dev == 0x2704u || dev == 0x2705u || dev == 0x2709u;
+	return dev == 0x2702u || dev == 0x2703u || dev == 0x2704u ||
+	       dev == 0x2705u || dev == 0x2709u;
 }
 
 static inline int gu_is_ad104_exp_id(unsigned short dev)
 {
-	return dev == 0x2782u || dev == 0x2783u || dev == 0x2786u || dev == 0x27b0u;
+	return dev == 0x2782u || dev == 0x2783u || dev == 0x2786u ||
+	       dev == 0x2788u || dev == 0x27b0u || dev == 0x27b2u;
 }
 
 static inline int gu_is_other_ada_exp_id(unsigned short dev)
@@ -48,7 +50,7 @@ static inline int gu_is_turing_exp_id(unsigned short dev)
 	/* TU106: RTX 2070, RTX 2060 SUPER, RTX 2060 12GB/6GB, CMP 40HX */
 	if (dev == 0x1f02u || dev == 0x1f03u || dev == 0x1f06u ||
 	    dev == 0x1f07u || dev == 0x1f08u || dev == 0x1f0au ||
-	    dev == 0x1f42u || dev == 0x1f47u)
+	    dev == 0x1f0bu || dev == 0x1f42u || dev == 0x1f47u)
 		return 1;
 	return 0;
 }

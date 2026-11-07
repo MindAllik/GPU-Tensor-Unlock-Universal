@@ -142,7 +142,7 @@ static EFI_STATUS ConfigCheck(BOOLEAN Save) {
   /* Validate discovered BAR/capability layout, then pin the whole snapshot.
    * Firmware-assigned MMIO addresses differ from the reference motherboard. */
   BOOLEAN class_ok=(config[2]==GU_BOARD_CLASS_REV) ||
-    (((config[2]>>24)==0x03U) && ((((config[2]>>16)&0xffU)==0x00U) || (((config[2]>>16)&0xffU)==0x02U)) && ((config[2]&0xf0U)==0xa0U));
+    (((config[2]>>24)==0x03U) && ((((config[2]>>16)&0xffU)==0x00U) || (((config[2]>>16)&0xffU)==0x02U)) && (((config[2]&0xf0U)==0xa0U) || ((config[2]&0xf0U)==0xb0U)));
   BOOLEAN bme_ok=!Gu.owned || !(config[1]&4U);
   BOOLEAN valid=checked && class_ok && bme_ok &&
     !(config[4]&1U) && ((config[4]&6U)==0 || (config[4]&6U)==4) &&
@@ -179,11 +179,9 @@ static EFI_STATUS RestoreDecode(VOID) {
         Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationDisable,EFI_PCI_IO_ATTRIBUTE_BUS_MASTER,NULL);
       }
     }
-    if(current[1]&4U) {
-      EFI_STATUS clr=GuClearMaster();
-      if(EFI_ERROR(clr))return clr;
-      status=ReadConfig(current);if(EFI_ERROR(status))return status;
-    }
+    EFI_STATUS clr=GuClearMaster();
+    if(EFI_ERROR(clr))return clr;
+    status=ReadConfig(current);if(EFI_ERROR(status))return status;
   }
   UINT32 missing=InitialConfig[1]&~current[1]&3U;
   memcpy(normalized,current,sizeof(normalized));normalized[1]|=missing;
@@ -290,7 +288,7 @@ static EFI_STATUS ColdCheck(VOID) {
     .boot=GuRead32(GU_GFW_BOOT_OFFSET),.cpuctl=GuRead32(GU_GFW_CPUCTL_OFFSET)};
   UINT32 hi=GuRead32(0x1fa828),plm=GuRead32(GU_FEAT_PLM_OFFSET),ss0=GuRead32(GU_FEAT_SS0_OFFSET),ss1=GuRead32(GU_FEAT_SS1_OFFSET);
   GuLog("cold state: chip=%#x plm=%#x gfw=%#x/%#x/%#x WPR2_HI=%#x SS0=%#x SS1=%#x\n",
-    GU_BOARD_CHIP,plm,s.plm,s.boot,s.cpuctl,hi,ss0,ss1);
+    chip,plm,s.plm,s.boot,s.cpuctl,hi,ss0,ss1);
   UINT32 wpr_cfg=GuRead32(0x1fa7cc),fbpa=GuRead32(0x9a0148),wpr=GuRead32(0x1fa7c4);
   GuLog("cold PLMs: WPR_CFG=%#x FBPA=%#x WPR=%#x FEAT=%#x\n",wpr_cfg,fbpa,wpr,plm);
   /* Diagnostic reads requested for RUN07 follow-up. The meaning/bit map of

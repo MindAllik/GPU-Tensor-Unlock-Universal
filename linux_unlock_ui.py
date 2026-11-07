@@ -69,6 +69,7 @@ class LinuxUnlockApp(tk.Tk):
         self._setup_styles()
         self._build_layout()
         self._apply_language(self.lang)
+        self.after(60, self._ensure_initial_pane_layout)
         self.after(150, self.action_rescan_hardware)
 
     def _on_close_window(self) -> None:
@@ -122,7 +123,7 @@ class LinuxUnlockApp(tk.Tk):
             fieldbackground=BG_INPUT,
             borderwidth=1,
             relief="solid",
-            rowheight=26,
+            rowheight=23,
             font=("Consolas", 10),
         )
         style.configure(
@@ -186,9 +187,9 @@ class LinuxUnlockApp(tk.Tk):
         )
 
     def _make_panel(self, parent: tk.Widget) -> tuple[tk.Frame, tk.Label]:
-        outer = tk.Frame(parent, bg=BG_PANEL, highlightbackground=BORDER_COL, highlightthickness=1, padx=10, pady=8)
+        outer = tk.Frame(parent, bg=BG_PANEL, highlightbackground=BORDER_COL, highlightthickness=1, padx=10, pady=5)
         hdr = tk.Label(outer, text="", bg=BG_PANEL, fg=FG_CYAN, font=("Consolas", 10, "bold"), anchor="w")
-        hdr.pack(fill="x", pady=(0, 6))
+        hdr.pack(fill="x", pady=(0, 4))
         return outer, hdr
 
     def _make_btn(self, parent: tk.Widget, command: Any, accent: bool = False) -> tk.Button:
@@ -208,7 +209,7 @@ class LinuxUnlockApp(tk.Tk):
             highlightbackground=BORDER_COL,
             highlightthickness=1,
             padx=10,
-            pady=5,
+            pady=3,
             cursor="hand2",
             font=("Consolas", 9, "bold"),
         )
@@ -229,8 +230,8 @@ class LinuxUnlockApp(tk.Tk):
         return tk.Entry(parent, **kw)
 
     def _build_layout(self) -> None:
-        top_bar = tk.Frame(self, bg=BG_PANEL, highlightbackground=BORDER_COL, highlightthickness=1, padx=14, pady=8)
-        top_bar.pack(fill="x", padx=10, pady=(10, 6))
+        top_bar = tk.Frame(self, bg=BG_PANEL, highlightbackground=BORDER_COL, highlightthickness=1, padx=14, pady=6)
+        top_bar.pack(fill="x", padx=10, pady=(8, 4))
 
         title_box = tk.Frame(top_bar, bg=BG_PANEL)
         title_box.pack(side="left", fill="x", expand=True)
@@ -238,6 +239,8 @@ class LinuxUnlockApp(tk.Tk):
         self.lbl_title.pack(fill="x")
         self.lbl_subtitle = tk.Label(title_box, text="", bg=BG_PANEL, fg=FG_MUTED, font=("Consolas", 9), anchor="w")
         self.lbl_subtitle.pack(fill="x")
+        self.lbl_issues_note = tk.Label(title_box, text="", bg=BG_PANEL, fg=FG_AMBER, font=("Consolas", 8, "bold"), anchor="w")
+        self.lbl_issues_note.pack(fill="x", pady=(1, 0))
 
         lang_box = tk.Frame(top_bar, bg=BG_PANEL)
         lang_box.pack(side="right")
@@ -277,17 +280,19 @@ class LinuxUnlockApp(tk.Tk):
         mid_frame.columnconfigure(0, weight=11)
         mid_frame.columnconfigure(1, weight=13)
         mid_frame.rowconfigure(0, weight=1)
-        self.main_paned.add(mid_frame, minsize=280, stretch="always")
+        self.main_paned.add(mid_frame, minsize=465, stretch="always")
 
         left_col = tk.Frame(mid_frame, bg=BG_MAIN)
         left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        self.left_col = left_col
 
         right_col = tk.Frame(mid_frame, bg=BG_MAIN)
         right_col.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        self.right_col = right_col
 
         # --- LEFT COLUMN: [01] LINUX HARDWARE, [02] KERNEL BUILD ENV, [03] MODULE EXECUTION ---
         self.pnl_hw, self.hdr_hw = self._make_panel(left_col)
-        self.pnl_hw.pack(fill="x", pady=(0, 6))
+        self.pnl_hw.pack(fill="x", pady=(0, 4))
 
         hw_grid = tk.Frame(self.pnl_hw, bg=BG_PANEL)
         hw_grid.pack(fill="x")
@@ -318,11 +323,11 @@ class LinuxUnlockApp(tk.Tk):
         ]
         for r_idx, (lkey, var1, var2) in enumerate(rows_spec):
             lbl = tk.Label(hw_grid, text="", bg=BG_PANEL, fg=FG_MUTED, font=("Consolas", 9), anchor="w")
-            lbl.grid(row=r_idx, column=0, sticky="w", pady=2, padx=(0, 8))
+            lbl.grid(row=r_idx, column=0, sticky="w", pady=1, padx=(0, 8))
             self.hw_labels[lkey] = lbl
 
             row_f = tk.Frame(hw_grid, bg=BG_PANEL)
-            row_f.grid(row=r_idx, column=1, sticky="ew", pady=2)
+            row_f.grid(row=r_idx, column=1, sticky="ew", pady=1)
             if var2 == "gpu_combo":
                 self.cb_gpu = ttk.Combobox(row_f, textvariable=var1, state="readonly", style="Console.TCombobox")
                 self.cb_gpu.pack(side="left", fill="x", expand=True)
@@ -345,7 +350,7 @@ class LinuxUnlockApp(tk.Tk):
                 e1.pack(side="left", fill="x", expand=True)
 
         hw_btn_row = tk.Frame(self.pnl_hw, bg=BG_PANEL)
-        hw_btn_row.pack(fill="x", pady=(6, 0))
+        hw_btn_row.pack(fill="x", pady=(4, 0))
         hw_btn_row.columnconfigure(0, weight=1)
         hw_btn_row.columnconfigure(1, weight=2)
         self.btn_rescan = self._make_btn(hw_btn_row, self.action_rescan_hardware)
@@ -355,29 +360,29 @@ class LinuxUnlockApp(tk.Tk):
 
         # [02] KERNEL BUILD ENVIRONMENT (HEADERS / DKMS / ZSTD)
         self.pnl_deps, self.hdr_deps = self._make_panel(left_col)
-        self.pnl_deps.pack(fill="x", pady=(0, 6))
+        self.pnl_deps.pack(fill="x", pady=(0, 4))
 
         deps_grid = tk.Frame(self.pnl_deps, bg=BG_PANEL)
         deps_grid.pack(fill="x")
         deps_grid.columnconfigure(1, weight=1)
 
         self.lbl_headers_title = tk.Label(deps_grid, text="", bg=BG_PANEL, fg=FG_MUTED, font=("Consolas", 9), anchor="w")
-        self.lbl_headers_title.grid(row=0, column=0, sticky="w", pady=2, padx=(0, 8))
+        self.lbl_headers_title.grid(row=0, column=0, sticky="w", pady=1, padx=(0, 8))
         self.lbl_headers_val = tk.Label(deps_grid, text="...", bg=BG_PANEL, fg=FG_GREEN, font=("Consolas", 9, "bold"), anchor="w")
-        self.lbl_headers_val.grid(row=0, column=1, sticky="w", pady=2)
+        self.lbl_headers_val.grid(row=0, column=1, sticky="w", pady=1)
 
         self.lbl_dkms_title = tk.Label(deps_grid, text="", bg=BG_PANEL, fg=FG_MUTED, font=("Consolas", 9), anchor="w")
-        self.lbl_dkms_title.grid(row=1, column=0, sticky="w", pady=2, padx=(0, 8))
+        self.lbl_dkms_title.grid(row=1, column=0, sticky="w", pady=1, padx=(0, 8))
         self.lbl_dkms_val = tk.Label(deps_grid, text="...", bg=BG_PANEL, fg=FG_GREEN, font=("Consolas", 9, "bold"), anchor="w")
-        self.lbl_dkms_val.grid(row=1, column=1, sticky="w", pady=2)
+        self.lbl_dkms_val.grid(row=1, column=1, sticky="w", pady=1)
 
         self.lbl_initramfs_title = tk.Label(deps_grid, text="", bg=BG_PANEL, fg=FG_MUTED, font=("Consolas", 9), anchor="w")
-        self.lbl_initramfs_title.grid(row=2, column=0, sticky="w", pady=2, padx=(0, 8))
+        self.lbl_initramfs_title.grid(row=2, column=0, sticky="w", pady=1, padx=(0, 8))
         self.lbl_initramfs_val = tk.Label(deps_grid, text="...", bg=BG_PANEL, fg=FG_GREEN, font=("Consolas", 9, "bold"), anchor="w")
-        self.lbl_initramfs_val.grid(row=2, column=1, sticky="w", pady=2)
+        self.lbl_initramfs_val.grid(row=2, column=1, sticky="w", pady=1)
 
         self.btn_install_deps = self._make_btn(self.pnl_deps, self.action_install_deps)
-        self.btn_install_deps.pack(fill="x", pady=(6, 0))
+        self.btn_install_deps.pack(fill="x", pady=(4, 0))
 
         # [03] KERNEL MODULE (GPU_UNLOCK.KO) & FIRMWARE EXECUTION
         self.pnl_dkms, self.hdr_dkms = self._make_panel(left_col)
@@ -391,10 +396,10 @@ class LinuxUnlockApp(tk.Tk):
             self.pnl_dkms, text="", bg=BG_PANEL, fg=FG_AMBER, font=("Consolas", 8),
             anchor="w", wraplength=540, justify="left",
         )
-        self.lbl_linux_note.pack(fill="x", pady=(0, 6))
+        self.lbl_linux_note.pack(fill="x", pady=(0, 3))
 
         self.btn_apply_unlock = self._make_btn(self.pnl_dkms, self.action_apply_unlock, accent=True)
-        self.btn_apply_unlock.pack(fill="x", pady=(2, 4))
+        self.btn_apply_unlock.pack(fill="x", pady=(1, 3))
 
         sub_row = tk.Frame(self.pnl_dkms, bg=BG_PANEL)
         sub_row.pack(fill="x")
@@ -424,7 +429,7 @@ class LinuxUnlockApp(tk.Tk):
         self.lbl_bench_banner.pack(fill="x", pady=(0, 6))
 
         cols = ("inst", "fuse", "before", "after", "current", "gain")
-        self.tree_bench = ttk.Treeview(self.pnl_bench, columns=cols, show="headings", style="Console.Treeview", height=8)
+        self.tree_bench = ttk.Treeview(self.pnl_bench, columns=cols, show="headings", style="Console.Treeview", height=7)
         self.tree_bench.column("inst", width=230, anchor="w")
         self.tree_bench.column("fuse", width=65, anchor="center")
         self.tree_bench.column("before", width=105, anchor="e")
@@ -453,7 +458,7 @@ class LinuxUnlockApp(tk.Tk):
 
         # --- BOTTOM FULL-WIDTH CONSOLE LOG (DRAGGABLE TOP BORDER VIA PANEDWINDOW) ---
         self.pnl_console = tk.Frame(self.main_paned, bg=BG_PANEL, highlightbackground=BORDER_COL, highlightthickness=1, padx=10, pady=8)
-        self.main_paned.add(self.pnl_console, minsize=120, stretch="always")
+        self.main_paned.add(self.pnl_console, minsize=105, stretch="never")
 
         console_hdr_bar = tk.Frame(self.pnl_console, bg=BG_PANEL)
         console_hdr_bar.pack(fill="x", pady=(0, 6))
@@ -493,7 +498,7 @@ class LinuxUnlockApp(tk.Tk):
             selectbackground=BTN_ACCENT,
             selectforeground="#ffffff",
             relief="flat",
-            height=10,
+            height=6,
             font=("Consolas", 9),
             wrap="none",
             exportselection=True,
@@ -516,12 +521,25 @@ class LinuxUnlockApp(tk.Tk):
 
         self._refresh_benchmark_table()
 
+    def _ensure_initial_pane_layout(self) -> None:
+        """Ensure the top pane (Sections [01]-[04]) is tall enough on startup so bottom buttons in [03] are never clipped."""
+        try:
+            self.update_idletasks()
+            req_h = max(self.left_col.winfo_reqheight(), self.right_col.winfo_reqheight()) + 10
+            paned_h = self.main_paned.winfo_height()
+            if paned_h > 200:
+                target_y = min(req_h, max(465, paned_h - 115))
+                self.main_paned.sash_place(0, 0, target_y)
+        except Exception:
+            pass
+
     def _apply_language(self, code: str) -> None:
         self.lang = code
         t = I18N_LINUX[code]
         self.title(t["app_title"])
         self.lbl_title.configure(text=t["app_title"])
         self.lbl_subtitle.configure(text=t["subtitle"])
+        self.lbl_issues_note.configure(text=t["issues_note"])
         self.lbl_lang.configure(text=t["lang_label"])
 
         for c, btn in self.lang_btns.items():

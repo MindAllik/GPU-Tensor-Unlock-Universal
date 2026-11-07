@@ -3,5 +3,14 @@
   {"Name":"v67-ga102-610.43.03.bin","Bytes":64000,"Sha256":"2a0aa1f86d0b6afff5214d641d87d46dc98ef06ed908ff05d0ddbad5ffb7e197"},
   {"Name":"gsp_ga10x.bin","Bytes":84277400,"Sha256":"572373620a37418f24dc16b5031c39338778c3257e48e8408de9a57291b24f3a"},
   {"Name":"gsp_boot_ga102.bin","Bytes":24576,"Sha256":"3df651acb174fd5f5561a1996965b192f50c5d763168446ed0d4ead19d895768"},
-  {"Name":"gsp_boot_desc_ga102.bin","Bytes":84,"Sha256":"cc5a3fc1f4c47f2fe107b1b68f0176d8a448e6dec84b575e5560ccef5262bf15"}
+  {"Name":"gsp_boot_desc_ga102.bin","Bytes":84,"Sha256":"cc5a3fc1f4c47f2fe107b1b68f0176d8a448e6dec84b575e5560ccef5262bf15"},
+  {"Name":"booter_load_ad102.bin","Bytes":57672,"Sha256":"6ee05b20e1dc244c08c052f36ef28469b8d09f4955d1fe33e48a179e11a7fd49"},
+  {"Name":"v67-ad102-610.43.03-four-plm.bin","Bytes":64000,"Sha256":"44c36b2d6b3424e53e18f3e55db85c833655de071ce66ce42749588a4a7dc8cb"},
+  {"Name":"gsp_boot_ad102.bin","Bytes":36864,"Sha256":"45d6335a8185d6ff13e8d1484cea73f68d3d13aa1c19dc080ed1c3482dd5bac0"},
+  {"Name":"gsp_boot_desc_ad102.bin","Bytes":84,"Sha256":"83f8f3f1f5f9496e0ea8fc7103c2beb64d0b6de2f5ffe725f13514de5a95fa42"},
+  {"Name":"booter_load_tu102.bin","Bytes":59224,"Sha256":"a5cd2eb6a92f343003eb3da67905318dc24f59f77dc02fb48b6389098fbffdb5"},
+  {"Name":"v67-tu102-610.43.03.bin","Bytes":64000,"Sha256":"54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024"},
+  {"Name":"gsp_tu10x.bin","Bytes":46778072,"Sha256":"d9d9e0f23ccaa9f82e6879c97a7fb0962a421f7b713ba9ff2169641d34ef47be"},
+  {"Name":"gsp_boot_tu102.bin","Bytes":16384,"Sha256":"b2bdccbb79ad4dd48d85c35b00d9ccdf34625bd323805be3f9045a4a24d09fa5"},
+  {"Name":"gsp_boot_desc_tu102.bin","Bytes":84,"Sha256":"d66ab92e021b08d58045569df6956ef1bc742c57e7b31736b172578df87eb0e8"}
 ]

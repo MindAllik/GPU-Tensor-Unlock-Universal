@@ -386,6 +386,9 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
             self.assertIn('style="Console.Vertical.TScrollbar"', src, f"{fname} must use dark Console.Vertical.TScrollbar")
             self.assertIn("def _refresh_deps_labels(self) -> None:", src, f"{fname} must define _refresh_deps_labels")
             self.assertIn("self._refresh_deps_labels()", src, f"{fname} must call _refresh_deps_labels on language switch")
+            self.assertIn("def _ensure_initial_pane_layout(self) -> None:", src, f"{fname} must define _ensure_initial_pane_layout")
+            self.assertIn("self.lbl_issues_note", src, f"{fname} must display GitHub Issues feedback notice")
+            self.assertIn('stretch="never"', src, f"{fname} must keep console pane stretch=never on startup")
 
 
     def test_win32_ioctl_esp_detection_and_auto_esp_profile_fallback(self) -> None:
@@ -482,6 +485,45 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
         )
         fake_efi = b"MZ_FAKE_3090" + struct.pack("<I", 0x220410DE) + struct.pack("<I", 0x38811462)
         core_detector.verify_compiled_efi_profile(fake_efi, val_auto)
+
+    def test_upstream_pci_matrix_sync_and_rtx_3080_ti_20gb(self) -> None:
+        """Verify all PCI IDs in kernel/gpu_unlock/main.c + arch_610.h are in SUPPORT_MATRIX and 0x2205 (RTX 3080 Ti 20GB) works."""
+        import re
+        main_c = (core_detector.APP_ROOT / "kernel" / "gpu_unlock" / "main.c").read_text()
+        arch_h = (core_detector.APP_ROOT / "kernel" / "gpu_unlock" / "arch_610.h").read_text()
+        c_ids = {int(x, 16) for x in re.findall(r"0x[0-9a-fA-F]{4}(?=u|\b)", main_c + "\n" + arch_h)}
+        for dev16 in sorted(c_ids):
+            self.assertIn(dev16, core_detector.SUPPORT_MATRIX, f"PCI ID 0x{dev16:04x} missing from SUPPORT_MATRIX")
+            self.assertIn(dev16, core_detector.NOMINAL_VRAM_MIB, f"PCI ID 0x{dev16:04x} missing from NOMINAL_VRAM_MIB")
+
+        # Verify 0x220510de (Gigabyte RTX 3080 Ti 20GB GA102-250 reported as "NVIDIA Graphics Device")
+        cls_2205 = core_detector.classify_pci_device(0x2205, "NVIDIA Graphics Device")
+        self.assertTrue(cls_2205["supported"])
+        self.assertEqual(cls_2205["die_name"], "GA102")
+        self.assertEqual(cls_2205["chip_id"], 0x172000A1)
+        enriched = core_detector._enrich_generic_gpu_name("NVIDIA Graphics Device", 0x2205)
+        self.assertIn("RTX 3080 Ti 20GB", enriched)
+
+        # Verify validate_target_profile accepts both 0x172000a1 and 0xb72000a1 (Samsung 8N strap bits 31:29)
+        for chip_hex in ("0x172000a1", "0xb72000a1"):
+            prof = core_detector.validate_target_profile({
+                "gpu_name": enriched,
+                "die_name": "GA102",
+                "chip_id_hex": chip_hex,
+                "board_id_hex": "0x220510de",
+                "subsystem_id_hex": "0x40591458",
+                "segment_hex": "0x0",
+                "bus_hex": "0x05",
+                "device_hex": "0x0",
+                "function_hex": "0x0",
+                "vram_min_hex": "0x4c00",
+                "vram_max_hex": "0x5400",
+                "esp_guid": "{83b25fc2-062d-47db-8de4-4749da3aa3c7}",
+                "esp_part_num": 1,
+            })
+            self.assertEqual(prof["die_name"], "GA102")
+            self.assertEqual(prof["board_id"], 0x220510DE)
+            self.assertEqual(prof["subsys_id"], 0x40591458)
 
 
 if __name__ == "__main__":

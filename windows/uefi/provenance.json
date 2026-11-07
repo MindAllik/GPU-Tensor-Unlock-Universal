@@ -2,13 +2,13 @@
   "upstream": "https://huggingface.co/TOTORONG/AD103_win_unlocker",
   "revision": "51df9c17ec89eb8486df52cc9079dde4bd1f9974",
   "changes": [
-    "Universal Ada Lovelace (AD10x) & Ampere (GA10x) UEFI port v2.0",
+    "Universal Ada Lovelace (AD10x), Ampere (GA10x) & Turing (TU10x) UEFI port v2.0",
     "Separated OptionRomPolicy and PromPolicy with 1 MiB PreparedTransaction preflight & DMAP check",
     "Separated Ada vs Ampere completion and handoff contracts while preserving post-FLR DMA retention",
     "Unified GuClassifyColdState cold-state validator across preflight and GFW entry",
     "Full Segment:Bus:Device.Function + Subsystem PCI target filtering and secondary NVIDIA display support",
     "Manual confirmation default (KOH_UNATTENDED_AUTOFIRE=0) and isolated --profile-dir / --build-dir builds",
-    "ASan + UBSan clean across 43 core scenarios, 63 app/topology scenarios, and Ada/GA boundary probes"
+    "ASan + UBSan clean across 43 core scenarios, 64 app/topology scenarios, and Ada/GA boundary probes"
   ],
   "files": [
     {

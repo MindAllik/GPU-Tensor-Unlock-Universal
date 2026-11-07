@@ -66,7 +66,7 @@ Upstream research repositories proved that the V67 SEC2 Booter chain works on Tu
 
 5. **Offline Sanitizer & Kernel Test Suites**
 
-   * **Windows UEFI (`python3 windows/uefi/run_self_test.py`)**: Compiles and runs 43 core transaction scenarios and 56 UEFI application/topology scenarios against simulated PCI/MMIO/DMA hardware under `gcc -fsanitize=address,undefined`.
+   * **Windows UEFI (`python3 windows/uefi/run_self_test.py`)**: Compiles and runs 43 core transaction scenarios and 64 UEFI application/topology scenarios against simulated PCI/MMIO/DMA hardware under `gcc -fsanitize=address,undefined`.
 
    * **Linux Kernel & Tooling (`python3 -m unittest discover -s tests -v`)**: Runs unit and C kernel tests covering `unlock_610.c`, `main.c`, `prep_610.c`, `vbios_610.c`, `layout_610.c`, `gfw_eval.c`, `read_sm_rates.py`, and `sysfs`/`lspci` auto-detection.
 
@@ -88,7 +88,7 @@ Upstream research repositories proved that the V67 SEC2 Booter chain works on Tu
 
 * **Experimental Opt-In (Simulated Desktop Profiles)** (validated offline under ASan/UBSan; require explicit single-card BDF selection and family opt-in flag on Linux):
   * **Ada Lovelace (`AD102..AD107`)**: RTX 4090 D (`2685`), RTX 4080 SUPER (`2702`), RTX 4080 (`2704`), RTX 4070 SUPER (`2783`), RTX 4070 (`2786`/`2709`), RTX 4060 Ti (`2803`/`2805`/`27b0`), RTX 4060 (`2882`).
-  * **Ampere (`GA102..GA106`)**: RTX 3090 Ti (`2203`), RTX 3080 Ti (`2208`), RTX 3080 12GB (`220a`), RTX 3070 Ti (`2482`/`2207`), RTX 3070 (`2484`/`2488`), RTX 3060 Ti (`2486`/`2489`/`2414`), RTX 3060 (`2503`).
+  * **Ampere (`GA102..GA107`)**: RTX 3090 Ti (`2203`), RTX 3080 Ti 12GB/20GB (`2208`/`2205`), RTX 3080 12GB/LHR (`220a`/`2216`), RTX 3070 Ti (`2482`/`2207`), RTX 3070 (`2484`/`2488`), RTX 3060 Ti (`2486`/`2489`/`24c9`/`2414`), RTX 3060 (`2503`/`2487`), RTX 3050 (`2507`/`2582`/`2584`), CMP 90HX/70HX (`220d`/`248a`).
   * **Turing (`TU102/TU104/TU106`)**: RTX 2080 Ti (`1e04`/`1e07`), TITAN RTX (`1e02`), RTX 2080 SUPER (`1e81`), RTX 2080 (`1e82`/`1e87`), RTX 2070 SUPER (`1e84`), RTX 2070 (`1f02`/`1f07`), RTX 2060 SUPER (`1f06`/`1f47`), RTX 2060 12GB (`1f03`), RTX 2060 6GB (`1f08`), CMP 50HX (`1e09`), CMP 40HX (`1f0b`).
 
 #### Credits & Upstream Acknowledgements
@@ -175,7 +175,7 @@ Source code in this repository is licensed under **GPL-2.0-only** (see `LICENSE`
 
 5. **Автономные тестовые наборы с санитайзерами**
 
-   * **Windows UEFI (`python3 windows/uefi/run_self_test.py`)**: компилирует и прогоняет 43 сценария аппаратной транзакции и 56 сценариев UEFI-приложения/топологии на эмулированном PCI/MMIO/DMA под `gcc -fsanitize=address,undefined`.
+   * **Windows UEFI (`python3 windows/uefi/run_self_test.py`)**: компилирует и прогоняет 43 сценария аппаратной транзакции и 64 сценария UEFI-приложения/топологии на эмулированном PCI/MMIO/DMA под `gcc -fsanitize=address,undefined`.
 
    * **Ядро Linux и утилиты (`python3 -m unittest discover -s tests -v`)**: прогоняет C- и Python-тесты для `unlock_610.c`, `main.c`, `prep_610.c`, `vbios_610.c`, `layout_610.c`, `gfw_eval.c`, `read_sm_rates.py` и автоопределения через `sysfs`/`lspci`.
 
@@ -197,7 +197,7 @@ Source code in this repository is licensed under **GPL-2.0-only** (see `LICENSE`
 
 * **Архитектурно поддерживаемые / симулированные профили (`Experimental Opt-In`)** (прошли офлайн-проверку под ASan/UBSan; в Linux требуют явного выбора одиночного BDF и флага семейства):
   * **Ada Lovelace (`AD102..AD107`)**: RTX 4090 D (`2685`), RTX 4080 SUPER (`2702`), RTX 4080 (`2704`), RTX 4070 SUPER (`2783`), RTX 4070 (`2786`/`2709`), RTX 4060 Ti (`2803`/`2805`/`27b0`), RTX 4060 (`2882`).
-  * **Ampere (`GA102..GA106`)**: RTX 3090 Ti (`2203`), RTX 3080 Ti (`2208`), RTX 3080 12GB (`220a`), RTX 3070 Ti (`2482`/`2207`), RTX 3070 (`2484`/`2488`), RTX 3060 Ti (`2486`/`2489`/`2414`), RTX 3060 (`2503`).
+  * **Ampere (`GA102..GA107`)**: RTX 3090 Ti (`2203`), RTX 3080 Ti 12GB/20GB (`2208`/`2205`), RTX 3080 12GB/LHR (`220a`/`2216`), RTX 3070 Ti (`2482`/`2207`), RTX 3070 (`2484`/`2488`), RTX 3060 Ti (`2486`/`2489`/`24c9`/`2414`), RTX 3060 (`2503`/`2487`), RTX 3050 (`2507`/`2582`/`2584`), CMP 90HX/70HX (`220d`/`248a`).
   * **Turing (`TU102/TU104/TU106`)**: RTX 2080 Ti (`1e04`/`1e07`), TITAN RTX (`1e02`), RTX 2080 SUPER (`1e81`), RTX 2080 (`1e82`/`1e87`), RTX 2070 SUPER (`1e84`), RTX 2070 (`1f02`/`1f07`), RTX 2060 SUPER (`1f06`/`1f47`), RTX 2060 12GB (`1f03`), RTX 2060 6GB (`1f08`), CMP 50HX (`1e09`), CMP 40HX (`1f0b`).
 
 #### Благодарности и использованные наработки (Upstream Credits)

@@ -1,32 +1,42 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 """Print exact, supported NVIDIA PCI boot options without changing the host."""
+from pathlib import Path
 import re
 import subprocess
 import sys
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+import core_detector  # noqa: E402
 
-DEVICES = {
-    "2684": ("RTX 4090", ""),
-    "2705": ("RTX 4070 Ti SUPER (experimental)", " gpu_unlock.ad103_experimental=1"),
-    "2782": ("RTX 4070 Ti (experimental)", " gpu_unlock.ad104_experimental=1"),
-    "1e04": ("RTX 2080 Ti (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1e07": ("RTX 2080 Ti (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1e02": ("TITAN RTX (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1e81": ("RTX 2080 SUPER (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1e82": ("RTX 2080 (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1e87": ("RTX 2080 Rev. A (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1e84": ("RTX 2070 SUPER (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1f02": ("RTX 2070 (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1f07": ("RTX 2070 Rev. A (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1f06": ("RTX 2060 SUPER (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1f47": ("RTX 2060 SUPER (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1f08": ("RTX 2060 6GB (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1f03": ("RTX 2060 12GB (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1e09": ("CMP 50HX (experimental)", " gpu_unlock.turing_experimental=1"),
-    "1f0b": ("CMP 40HX (experimental)", " gpu_unlock.turing_experimental=1"),
-}
 
+def _build_devices_map() -> dict[str, tuple[str, str]]:
+    devices: dict[str, tuple[str, str]] = {}
+    for dev16, (die, _chip_id, is_ada, _tier, model) in sorted(core_detector.SUPPORT_MATRIX.items()):
+        hex_id = f"{dev16:04x}"
+        short_model = re.sub(r"^NVIDIA\s+", "", model)
+        short_model = re.sub(r"^GeForce\s+", "", short_model)
+        if dev16 == 0x1E07:
+            short_model = "RTX 2080 Ti"
+        elif dev16 == 0x1F47:
+            short_model = "RTX 2060 SUPER"
+        boot_opt = core_detector.get_linux_boot_option_for_gpu({
+            "pci_bdf": "0000:01:00.0",
+            "board_id_hex": f"0x{dev16:04x}10de",
+            "gpu_name": model,
+        })
+        extra = ""
+        if " " in boot_opt:
+            extra = " " + boot_opt.split(" ", 1)[1]
+        is_exp = bool(extra)
+        label = f"{short_model} (experimental)" if is_exp else short_model
+        devices[hex_id] = (label, extra)
+    return devices
+
+
+DEVICES: dict[str, tuple[str, str]] = _build_devices_map()
 _DEVICE_REGEX = "|".join(sorted(DEVICES.keys()))
 
 
@@ -49,9 +59,8 @@ def main() -> int:
         return 1
     found = candidates(result.stdout)
     if not found:
-        print("No supported RTX 4090 (10de:2684), experimental RTX 4070 Ti SUPER "
-              "(10de:2705), experimental RTX 4070 Ti (10de:2782), or experimental "
-              "RTX 20-series / Turing card was found.", file=sys.stderr)
+        print("No supported NVIDIA Ada Lovelace (RTX 40-series), Ampere (RTX 30-series), "
+              "or Turing (RTX 20-series) card was found.", file=sys.stderr)
         return 2
     for address, device in found:
         label, extra = DEVICES[device]

@@ -1,6 +1,6 @@
 # GPU-Tensor-Unlock-Universal
 
-**Version: 1.2.3**
+**Version: 1.2.5**
 
 **Pre-driver `FMLA32` Tensor Core unlocker and PTX benchmark console for GeForce RTX 40-series (Ada Lovelace), RTX 30-series (Ampere), and RTX 20-series (Turing) on Windows 10/11 (UEFI USB) and Linux (`gpu_unlock.ko`).**
 
@@ -41,7 +41,7 @@ Upstream research repositories proved that the V67 SEC2 Booter chain works on Tu
    - Includes one-click VBIOS maximum power limit adjustment via NVML with hardware readback verification.
 
 5. **Offline Sanitizer & Kernel Test Suites**
-   - **Windows UEFI (`python3 windows/uefi/run_self_test.py`)**: Compiles and runs 43 core transaction scenarios and 56 UEFI application/topology scenarios against simulated PCI/MMIO/DMA hardware under `gcc -fsanitize=address,undefined`.
+   - **Windows UEFI (`python3 windows/uefi/run_self_test.py`)**: Compiles and runs 43 core transaction scenarios and 64 UEFI application/topology scenarios against simulated PCI/MMIO/DMA hardware under `gcc -fsanitize=address,undefined`.
    - **Linux Kernel & Tooling (`python3 -m unittest discover -s tests -v`)**: Runs unit and C kernel tests covering `unlock_610.c`, `main.c`, `prep_610.c`, `vbios_610.c`, `layout_610.c`, `gfw_eval.c`, `read_sm_rates.py`, and `sysfs`/`lspci` auto-detection.
 
 ## Quick Start — Windows 10 / 11 (`Windows_Launch_UI.bat`)
@@ -87,7 +87,7 @@ Upstream research repositories proved that the V67 SEC2 Booter chain works on Tu
 | **Ada (`AD102` / `AD103`) — Upstream** | `0x192000a1` / `0x193000a1` | **Upstream Hardware-Tested** | GeForce RTX 4090 (`10de:2684`), GeForce RTX 4070 Ti SUPER (`10de:2705`) | `targets=<BDF>` (`4090`) or `targets=<BDF> ad103_experimental=1` (`4070 TiS`) \* |
 | **Ampere (`GA102` / `GA106`) — Upstream** | `0x172000a1` / `0x176000a1` | **Upstream Hardware-Tested** | GeForce RTX 3090 (`10de:2204`), RTX 3080 (`10de:2206`), RTX 3060 12GB (`10de:2504`) | `modprobe gpu_unlock targets=<BDF>` (or `all`) |
 | **Ada (`AD102/103/104/106/107`)** | `0x192..0x197` | **Experimental Opt-In (Simulated)** | GeForce RTX 4090 D (`2685`), 4080 SUPER (`2702`), 4080 (`2704`), 4070 SUPER (`2783`), 4070 (`2786`/`2709`), 4060 Ti (`2803`/`2805`/`27b0`), 4060 (`2882`) | `targets=<BDF>` + family flag (`ad103_experimental=1`, `ad104_experimental=1`, or `ada_experimental=1`) |
-| **Ampere (`GA102/103/104/106`)** | `0x172..0x176` | **Experimental Opt-In (Simulated)** | GeForce RTX 3090 Ti (`2203`), 3080 Ti (`2208`), 3080 12GB (`220a`), 3070 Ti (`2482`/`2207`), 3070 (`2484`/`2488`), 3060 Ti (`2486`/`2489`/`2414`), 3060 (`2503`) | `modprobe gpu_unlock targets=<BDF>` (or `all`) |
+| **Ampere (`GA102/103/104/106/107`)** | `0x172..0x177` (incl. `0xb72..0xb77` 8N strap) | **Experimental Opt-In (Simulated)** | GeForce RTX 3090 Ti (`2203`), 3080 Ti 12GB/20GB (`2208`/`2205`), 3080 12GB/LHR (`220a`/`2216`), 3070 Ti (`2482`/`2207`), 3070 (`2484`/`2488`), 3060 Ti (`2486`/`2489`/`24c9`/`2414`), 3060 (`2503`/`2487`), 3050 (`2507`/`2582`/`2584`), CMP 90HX/70HX (`220d`/`248a`) | `modprobe gpu_unlock targets=<BDF>` (or `all`) |
 | **Turing (`TU102/104/106`)** | `0x162/164/166` | **Experimental Opt-In (Simulated)** | GeForce RTX 2080 Ti (`1e04`/`1e07`), TITAN RTX (`1e02`), 2080 SUPER (`1e81`), 2080 (`1e82`/`1e87`), 2070 SUPER (`1e84`), 2070 (`1f02`/`1f07`), 2060 SUPER (`1f06`/`1f47`), 2060 12GB (`1f03`), 2060 6GB (`1f08`), CMP 50HX (`1e09`), CMP 40HX (`1f0b`) | `modprobe gpu_unlock targets=<BDF> turing_experimental=1` \* |
 
 *\* Note on Linux module flags: Hardware-validated `RTX 4070 Ti` (`10de:2782`), `RTX 4070 Ti SUPER` (`10de:2705`), and experimental Turing (`TU102`/`TU104`/`TU106`) targets intentionally retain a mandatory single-BDF requirement and their family opt-in module parameters (`ad104_experimental=1`, `ad103_experimental=1`, `turing_experimental=1`) in `gpu_unlock.ko` so that a wildcard `targets=all` setting on a multi-GPU machine cannot accidentally capture an Ada or Turing card without explicit per-device opt-in.*

@@ -4,7 +4,7 @@
 
 No BAR mapping, register write, firmware upload, reset, CUDA context or kernel.
 Allocates only temporary RM client/device/subdevice handles, closed on exit.
-Requires one GPU with the specified UUID to avoid device-instance ambiguity.
+Requires a GPU matching the specified UUID to avoid device-instance ambiguity.
 ABI: NVIDIA open-gpu-kernel-modules 610.43.03, ctrl2080gr.h and cl0080.h.
 """
 import argparse
@@ -67,8 +67,14 @@ def gpu_identity():
 
 def read_rates(expected_uuid, ioctl=None):
     identity = gpu_identity()
-    if len(identity) != 1 or identity[0].split(",", 1)[0].strip() != expected_uuid:
+    matches = [
+        (idx, line)
+        for idx, line in enumerate(identity)
+        if line.split(",", 1)[0].strip() == expected_uuid
+    ]
+    if len(matches) != 1:
         raise RuntimeError("expected one GPU with the exact supplied UUID")
+    gpu_idx, matched_line = matches[0]
     if ioctl is None:
         import fcntl
         ioctl = fcntl.ioctl
@@ -77,7 +83,7 @@ def read_rates(expected_uuid, ioctl=None):
         open_flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0)
         ctl = os.open("/dev/nvidiactl", open_flags)
         descriptors.append(ctl)
-        descriptors.append(os.open("/dev/nvidia0", open_flags))
+        descriptors.append(os.open(f"/dev/nvidia{gpu_idx}", open_flags))
 
         def allocate(root, parent, cls, params=None):
             request = Alloc(root=root, parent=parent, cls=cls,
@@ -89,7 +95,7 @@ def read_rates(expected_uuid, ioctl=None):
             return request.new
 
         client = allocate(0, 0, 0x41)
-        device = allocate(client, client, 0x80, Device())
+        device = allocate(client, client, 0x80, Device(device=gpu_idx))
         subdevice = allocate(client, device, 0x2080, U32(0))
         rates = Rates()
         request = Control(client=client, obj=subdevice, cmd=GET_SM_RATES,
@@ -98,7 +104,7 @@ def read_rates(expected_uuid, ioctl=None):
         values = {name: getattr(rates, name) for name in RATE_FIELDS}
         if any(value > 6 for value in values.values()):
             raise RuntimeError("driver returned an unknown issue-rate encoding")
-        return {"gpu": identity[0], "command": f"0x{GET_SM_RATES:x}",
+        return {"gpu": matched_line, "command": f"0x{GET_SM_RATES:x}",
                 "rates": values, "meaning": "0=full; 1=half; 2=quarter; higher values are further reductions",
                 "hardware_changes": False}
     finally:

@@ -8,6 +8,7 @@ I18N: dict[str, dict[str, str]] = {
     "EN": {
         "app_title": "NVIDIA GPU TENSOR UNLOCK // UNIVERSAL CONSOLE [WINDOWS 10 / 11]",
         "subtitle": "Pre-Boot UEFI FMLA32 Speed-Select Unlocker for Ada Lovelace (RTX 40xx), Ampere (RTX 30xx) & Turing (RTX 20xx)",
+        "issues_note": "If you encounter any issues, please describe them in the project's GitHub Issues — your feedback is very valuable to me!",
         "lang_label": "LANGUAGE:",
         "sec_hw": "[01] DETECTED HARDWARE & SYSTEM PROFILE (LOCKED TO HARDWARE)",
         "sec_deps": "[02] BUILD ENVIRONMENT & DEPENDENCIES",
@@ -27,7 +28,7 @@ I18N: dict[str, dict[str, str]] = {
         "lbl_esp": "Windows ESP GUID:",
         "lbl_prom_mode": "VBIOS Verification:",
         "lbl_cli_cmd": "Transparent CLI Command:",
-        "prom_auto": "AUTO (PreparedTransaction FWSEC-FRTS V3 + DMAP + Latched SHA-256)",
+        "prom_auto": "AUTO (PreparedTransaction FWSEC-FRTS V2/V3 + DMAP + Latched SHA-256)",
         "btn_rescan": "RESCAN HARDWARE",
         "btn_live_cli": "RUN LIVE CLI VERIFICATION (SHOW RAW NUMBERS)",
         "lbl_llvm": "LLVM (clang + lld-link):",
@@ -70,6 +71,7 @@ I18N: dict[str, dict[str, str]] = {
     "RU": {
         "app_title": "NVIDIA GPU TENSOR UNLOCK // УНИВЕРСАЛЬНАЯ КОНСОЛЬ [WINDOWS 10 / 11]",
         "subtitle": "UEFI-разблокировщик селекторов FMLA32 для видеокарт Ada Lovelace (RTX 40xx), Ampere (RTX 30xx) и Turing (RTX 20xx)",
+        "issues_note": "Если у вас возникли какие-то проблемы, пожалуйста, опишите их в Issues проекта на GitHub — это очень ценно для меня!",
         "lang_label": "ЯЗЫК / LANG:",
         "sec_hw": "[01] ОБНАРУЖЕННОЕ ОБОРУДОВАНИЕ И ПРОФИЛЬ (ЗАЩИЩЕНО ОТ РУЧНЫХ ИСКАЖЕНИЙ)",
         "sec_deps": "[02] СРЕДА СБОРКИ И ЗАВИСИМОСТИ",
@@ -89,7 +91,7 @@ I18N: dict[str, dict[str, str]] = {
         "lbl_esp": "GUID раздела EFI:",
         "lbl_prom_mode": "Проверка VBIOS:",
         "lbl_cli_cmd": "Команда прямой проверки:",
-        "prom_auto": "АВТО (PreparedTransaction FWSEC-FRTS V3 + DMAP + фиксация SHA-256)",
+        "prom_auto": "АВТО (PreparedTransaction FWSEC-FRTS V2/V3 + DMAP + фиксация SHA-256)",
         "btn_rescan": "ОБНОВИТЬ ЖЕЛЕЗО",
         "btn_live_cli": "ПРОВЕРИТЬ ДАННЫЕ В КОНСОЛИ (ПОКАЗАТЬ СЫРЫЕ ЦИФРЫ)",
         "lbl_llvm": "Компилятор LLVM (clang):",
@@ -132,6 +134,7 @@ I18N: dict[str, dict[str, str]] = {
     "ZH": {
         "app_title": "NVIDIA GPU TENSOR UNLOCK // 通用控制台 [WINDOWS 10 / 11]",
         "subtitle": "适用于 Ada Lovelace (RTX 40系)、Ampere (RTX 30系) 与 Turing (RTX 20系) 的 UEFI 预启动 FMLA32 算力解锁工具",
+        "issues_note": "如果您遇到任何问题，请在项目的 GitHub Issues 中描述并反馈，这对我非常宝贵！",
         "lang_label": "语言 / LANG:",
         "sec_hw": "[01] 检测到的硬件与系统配置 (硬件参数已锁定防篡改)",
         "sec_deps": "[02] 编译环境与依赖项检查",
@@ -151,7 +154,7 @@ I18N: dict[str, dict[str, str]] = {
         "lbl_esp": "Windows ESP 分区 GUID:",
         "lbl_prom_mode": "VBIOS 校验模式:",
         "lbl_cli_cmd": "透明命令行校验:",
-        "prom_auto": "自动 (PreparedTransaction FWSEC-FRTS V3 + DMAP + SHA-256 锁定)",
+        "prom_auto": "自动 (PreparedTransaction FWSEC-FRTS V2/V3 + DMAP + SHA-256 锁定)",
         "btn_rescan": "重新扫描硬件",
         "btn_live_cli": "执行命令行实时核验 (输出原始硬件数值)",
         "lbl_llvm": "LLVM 编译器 (clang + lld):",
@@ -193,6 +196,7 @@ I18N: dict[str, dict[str, str]] = {
     "HI": {
         "app_title": "NVIDIA GPU TENSOR UNLOCK // यूनिवर्सल कंसोल [WINDOWS 10 / 11]",
         "subtitle": "Ada Lovelace (RTX 40xx), Ampere (RTX 30xx) और Turing (RTX 20xx) के लिए UEFI प्री-बूट FMLA32 अनलॉकर",
+        "issues_note": "यदि आपको कोई समस्या आती है, तो कृपया प्रोजेक्ट के GitHub Issues में उसका वर्णन करें — यह मेरे लिए बहुत मूल्यवान है!",
         "lang_label": "भाषा / LANG:",
         "sec_hw": "[01] हार्डवेयर और सिस्टम प्रोफ़ाइल (हार्डवेयर से लॉक किया गया)",
         "sec_deps": "[02] बिल्ड एनवायरनमेंट और डिपेंडेंसी",
@@ -212,7 +216,7 @@ I18N: dict[str, dict[str, str]] = {
         "lbl_esp": "Windows ESP GUID:",
         "lbl_prom_mode": "VBIOS सत्यापन मोड:",
         "lbl_cli_cmd": "प्रत्यक्ष CLI कमांड:",
-        "prom_auto": "ऑटो (PreparedTransaction FWSEC-FRTS V3 + DMAP + SHA-256 सत्यापन)",
+        "prom_auto": "ऑटो (PreparedTransaction FWSEC-FRTS V2/V3 + DMAP + SHA-256 सत्यापन)",
         "btn_rescan": "हार्डवेयर री-स्कैन करें",
         "btn_live_cli": "कंसोल में लाइव CLI सत्यापन चलाएं (कच्चे आंकड़े देखें)",
         "lbl_llvm": "LLVM कंपाइलर (clang):",
@@ -281,6 +285,7 @@ I18N_LINUX: dict[str, dict[str, str]] = {
     "EN": {
         "app_title": "NVIDIA GPU TENSOR UNLOCK // LINUX KERNEL MODULE CONSOLE",
         "subtitle": "Kernel Module (gpu_unlock.ko) & RM Selector Unlocker for Ada Lovelace (RTX 40xx), Ampere (RTX 30xx) & Turing (RTX 20xx)",
+        "issues_note": "If you encounter any issues, please describe them in the project's GitHub Issues — your feedback is very valuable to me!",
         "lang_label": "LANGUAGE:",
         "sec_hw": "[01] DETECTED HARDWARE & LINUX KERNEL PROFILE (LOCKED TO HARDWARE)",
         "sec_deps": "[02] KERNEL BUILD ENVIRONMENT (HEADERS / DKMS / ZSTD)",
@@ -333,6 +338,7 @@ I18N_LINUX: dict[str, dict[str, str]] = {
     "RU": {
         "app_title": "NVIDIA GPU TENSOR UNLOCK // КОНСОЛЬ LINUX [KERNEL MODULE GPU_UNLOCK.KO]",
         "subtitle": "Ядерный разблокировщик селекторов FMLA32 (gpu_unlock.ko + RM ioctl) для видеокарт Ada Lovelace, Ampere и Turing",
+        "issues_note": "Если у вас возникли какие-то проблемы, пожалуйста, опишите их в Issues проекта на GitHub — это очень ценно для меня!",
         "lang_label": "ЯЗЫК / LANG:",
         "sec_hw": "[01] ОБНАРУЖЕННОЕ ОБОРУДОВАНИЕ И ПРОФИЛЬ LINUX (ЗАЩИЩЕНО ОТ ИСКАЖЕНИЙ)",
         "sec_deps": "[02] СРЕДА СБОРКИ МОДУЛЯ ЯДРА (KERNEL HEADERS / DKMS / ZSTD)",
@@ -385,6 +391,7 @@ I18N_LINUX: dict[str, dict[str, str]] = {
     "ZH": {
         "app_title": "NVIDIA GPU TENSOR UNLOCK // LINUX 内核模块控制台 [GPU_UNLOCK.KO]",
         "subtitle": "适用于 Ada Lovelace、Ampere 与 Turing 的 Linux 内核模块 (gpu_unlock.ko) 与 RM 选择器解锁工具",
+        "issues_note": "如果您遇到任何问题，请在项目的 GitHub Issues 中描述并反馈，这对我非常宝贵！",
         "lang_label": "语言 / LANG:",
         "sec_hw": "[01] 检测到的硬件与 LINUX 内核配置 (硬件参数已锁定)",
         "sec_deps": "[02] 内核编译环境检查 (KERNEL HEADERS / DKMS / ZSTD)",
@@ -437,6 +444,7 @@ I18N_LINUX: dict[str, dict[str, str]] = {
     "HI": {
         "app_title": "NVIDIA GPU TENSOR UNLOCK // LINUX कर्नेल मॉड्यूल कंसोल [GPU_UNLOCK.KO]",
         "subtitle": "Ada Lovelace, Ampere और Turing के लिए कर्नेल मॉड्यूल (gpu_unlock.ko) और RM सेलेक्टर अनलॉकर",
+        "issues_note": "यदि आपको कोई समस्या आती है, तो कृपया प्रोजेक्ट के GitHub Issues में उसका वर्णन करें — यह मेरे लिए बहुत मूल्यवान है!",
         "lang_label": "भाषा / LANG:",
         "sec_hw": "[01] हार्डवेयर और LINUX कर्नेल प्रोफ़ाइल (हार्डवेयर से लॉक)",
         "sec_deps": "[02] कर्नेल बिल्ड एनवायरनमेंट (HEADERS / DKMS / ZSTD)",

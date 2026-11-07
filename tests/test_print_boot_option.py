@@ -46,6 +46,27 @@ class PrintBootOptionTests(unittest.TestCase):
         self.assertIn("RTX 2080 Ti (experimental) at 0000:04:00.0 [10de:1e07]:", text)
         self.assertIn("gpu_unlock.targets=0000:04:00.0 gpu_unlock.turing_experimental=1", text)
 
+    def test_all_support_matrix_ids_present_and_ampere_boot_options(self):
+        import core_detector
+        for dev16 in core_detector.SUPPORT_MATRIX:
+            self.assertIn(f"{dev16:04x}", print_boot_option.DEVICES)
+        sample = (
+            "0000:0b:00.0 VGA compatible controller [0300]: NVIDIA Corporation GA102 [GeForce RTX 3090] [10de:2204] (rev a1)\n"
+            "0000:05:00.0 VGA compatible controller [0300]: NVIDIA Corporation GA102 [10de:2205] (rev a1)\n"
+        )
+        self.assertEqual(
+            print_boot_option.candidates(sample),
+            [("0000:0b:00.0", "2204"), ("0000:05:00.0", "2205")],
+        )
+        out = io.StringIO()
+        with patch("subprocess.run") as mock_run, patch("sys.stdout", out):
+            mock_run.return_value.stdout = sample
+            rc = print_boot_option.main()
+        self.assertEqual(rc, 0)
+        text = out.getvalue()
+        self.assertIn("gpu_unlock.targets=0000:0b:00.0\n", text)
+        self.assertIn("gpu_unlock.targets=0000:05:00.0\n", text)
+
 
 if __name__ == "__main__":
     unittest.main()
