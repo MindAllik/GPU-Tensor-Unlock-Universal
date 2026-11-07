@@ -30,6 +30,12 @@ LABELS = (
 
 def _array_bytes(text: str, label: str) -> tuple[bytes, bool, int]:
     marker = f'BINDATA_LABEL_{label}_data[]'
+    if text.count(marker) != 1 and label.endswith("_PROD"):
+        alt_label = label[:-5]
+        alt_marker = f'BINDATA_LABEL_{alt_label}_data[]'
+        if text.count(alt_marker) == 1:
+            label = alt_label
+            marker = alt_marker
     if text.count(marker) != 1:
         raise ValueError(f"missing or duplicate {label}")
     start = text.index(marker)
@@ -75,9 +81,9 @@ def build_bundle(source_text: str) -> bytes:
     patch_loc, _, _ = _array_bytes(source_text, "PATCH_LOC")
     patch_meta, _, _ = _array_bytes(source_text, "PATCH_META")
     num_sigs, _, _ = _array_bytes(source_text, "NUM_SIGS")
-    if len(header) != 36 or len(patch_loc) != 4 or len(patch_meta) != 12 or len(num_sigs) != 4:
+    if len(header) < 36 or len(patch_loc) != 4 or len(patch_meta) != 12 or len(num_sigs) != 4:
         raise ValueError("unexpected BooterLoad record size")
-    fields = struct.unpack("<9I", header)
+    fields = struct.unpack_from("<9I", header, 0)
     loc = struct.unpack("<I", patch_loc)[0]
     _fuse, engine, ucode = struct.unpack("<3I", patch_meta)
     count = struct.unpack("<I", num_sigs)[0]

@@ -182,6 +182,24 @@ static EFI_STATUS RestoreDecode(VOID) {
     EFI_STATUS clr=GuClearMaster();
     if(EFI_ERROR(clr))return clr;
     status=ReadConfig(current);if(EFI_ERROR(status))return status;
+    /* Stopping the NVIDIA UEFI GOP driver on boards that booted with BME=1 can
+       update volatile PCI Status / PCIe Device Status / vendor scratch dwords
+       while leaving BAR0..BAR5 and capabilities intact. Refresh non-BAR dwords
+       in InitialConfig when structural config validation passes. */
+    GU_CAPS post_caps;
+    UINT32 temp_cfg[64];
+    memcpy(temp_cfg,current,sizeof(temp_cfg));
+    temp_cfg[1]|=(InitialConfig[1]&3U);
+    BOOLEAN bars_match=(memcmp(&current[4],&InitialConfig[4],6*sizeof(UINT32))==0) &&
+                       ((current[12]&~1U)==(InitialConfig[12]&~1U));
+    if(bars_match && !(current[1]&4U) && GuCheckConfig(temp_cfg,segment,bus,device,function,&post_caps)) {
+      UINT32 saved_cmd_lo=InitialConfig[1]&0x0000fffbU;
+      for(UINTN k=0;k<64;k++) {
+        if(k==0 || k==2 || k==3 || (k>=4 && k<=9) || k==11 || k==12)continue;
+        InitialConfig[k]=current[k];
+      }
+      InitialConfig[1]=(current[1]&0xffff0000U)|saved_cmd_lo;
+    }
   }
   UINT32 missing=InitialConfig[1]&~current[1]&3U;
   memcpy(normalized,current,sizeof(normalized));normalized[1]|=missing;
@@ -198,6 +216,12 @@ static EFI_STATUS RestoreDecode(VOID) {
   status=Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationSupported,0,&supported);
   GuLog("decode supported attributes: status=%#llx mask=%#llx\n",(unsigned long long)status,(unsigned long long)supported);
   if(EFI_ERROR(status))return status;
+  if(InitialBootBme && !(supported&EFI_PCI_IO_ATTRIBUTE_IO) && (supported&EFI_PCI_IO_ATTRIBUTE_MEMORY)) {
+    needed&=~EFI_PCI_IO_ATTRIBUTE_IO;
+    missing&=~1U;
+    InitialConfig[1]&=~1U;
+    if(!missing){GuLogText("decode restore not needed (MMIO decode already active)\n");return EFI_SUCCESS;}
+  }
   if((supported&needed)!=needed)return EFI_UNSUPPORTED;
   status=Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&attributes);
   GuLog("decode current attributes: status=%#llx mask=%#llx\n",(unsigned long long)status,(unsigned long long)attributes);
@@ -215,6 +239,9 @@ static EFI_STATUS RestoreDecode(VOID) {
   BOOLEAN matched=FALSE;
   if(!EFI_ERROR(status)) {
     GuLogText("config after decode restore (256 valid bytes):\n");ConfigLog(after);
+    if(InitialBootBme && !EFI_ERROR(enabled) && (after[1]&2U) && !(after[1]&4U)) {
+      InitialConfig[1]=after[1];
+    }
     matched=!memcmp(after,InitialConfig,sizeof(after));GuLog("decode readback matched=%u\n",matched);
   }
   if(EFI_ERROR(enabled))return enabled;
@@ -251,7 +278,7 @@ static EFI_STATUS FindTarget(VOID) {
       }
     }
   }
-  GuFree(handles);GuLog("PCI target matches=%zu status=%#llx\n",(size_t)found,(unsigned long long)status);
+  GuFree(handles);GuLog("PCI target matches=%zu status=%#llx\n",(size_t)found,(size_t)status);
   if(EFI_ERROR(status) || found!=1)return EFI_UNSUPPORTED;
   return ConfigCheck(TRUE);
 }
@@ -406,6 +433,7 @@ static EFI_STATUS Arm(VOID) {
   GuLogText("Press U once within 30s to start now (or press Esc / wait 30s to cancel safely without hardware changes). One SEC2 fire, then selectors/FLR/Windows on full success. Power OFF on STOP.\n");
 #endif
   GuConsole("========================================================================\n");
+  GuCheckpointReport();
   if(!GuLogReady())return EFI_DEVICE_ERROR;
   UINTN total_ticks=KOH_AUTOCONFIRM_MS/100;
   for(UINTN i=0;i<total_ticks;i++) {
@@ -422,12 +450,13 @@ static EFI_STATUS Arm(VOID) {
         GuConsole("\n>>> [ESC PRESSED] Cancelled safely by user without hardware changes.\n");
         return EFI_ABORTED;
       }
-      if(key.UnicodeChar=='u' || key.UnicodeChar=='U') {
+      if(key.UnicodeChar=='u' || key.UnicodeChar=='U' || key.UnicodeChar==0x0433 || key.UnicodeChar==0x0413 || key.UnicodeChar=='\r' || key.UnicodeChar=='\n' || key.UnicodeChar==' ' || key.UnicodeChar=='y' || key.UnicodeChar=='Y') {
         GuConsole("\n========================================================================\n");
-        GuConsole(">>> [KEY 'U' ACCEPTED] STARTING HARDWARE UNLOCK & PCIe FLR (2-5s)...\n");
+        GuLogText(">>> [KEY 'U' ACCEPTED] STARTING HARDWARE UNLOCK & PCIe FLR (2-5s)...\n");
         GuConsole("[STAGE 3/3] Screen will freeze briefly while UEFI display driver disconnects.\n");
-        GuConsole("            Do NOT press keys or power off — Windows boots automatically!\n");
+        GuConsole("            Do NOT press keys or power off -- Windows boots automatically!\n");
         GuConsole("========================================================================\n");
+        GuCheckpointReport();
         return EFI_SUCCESS;
       }
     } else if(status!=EFI_NOT_READY)return status;
@@ -436,10 +465,12 @@ static EFI_STATUS Arm(VOID) {
 #if KOH_UNATTENDED_AUTOFIRE
   GuConsole("\n");
   GuLogText("No key pressed: unattended auto-attempt starting now (confirmation=unattended).\n");
+  GuCheckpointReport();
   return EFI_SUCCESS;
 #else
   GuConsole("\n");
   GuLogText("No key pressed within confirmation window: safe timeout abort without hardware changes (confirmation=manual).\n");
+  GuCheckpointReport();
   return EFI_TIMEOUT;
 #endif
 }
@@ -456,8 +487,10 @@ static VOID PausePreflightFailure(VOID) {
   }
 }
 static VOID Halt(VOID) {
-  Gu.retained=TRUE;
+  GuRestoreUpstreamBridgeMaster();
   GuLogText("STOP: cleanup cannot be proven. Resources remain reserved.\nPOWER OFF using the physical power button; do not continue to Windows.\n");
+  GuCloseLogForHalt();
+  Gu.retained=TRUE;
   /* No ResetSystem, ExitBootServices, retry, protocol close or memory release. */
   for(;;)Gu.bs->Stall(1000000);
 }
@@ -474,6 +507,7 @@ static VOID ReleaseHalt(EFI_STATUS Status,BOOLEAN Attempted) {
   EFI_STATUS refreshed=GuRefreshTargetPci();
   EFI_STATUS contained=EFI_ERROR(refreshed)?refreshed:GuClearMaster();
   Gu.bs->RestoreTPL(old);
+  GuRestoreUpstreamBridgeMaster();
   LogContainment();
   GuLog("FINAL status=%#llx stage=%s attempted=%u driver_release=1 clean=0 containment=%#llx pci_available=%u\n",
     (unsigned long long)Status,Stage,Attempted,(unsigned long long)contained,(unsigned)(Gu.pci!=NULL));
@@ -539,6 +573,7 @@ EFI_STATUS EFIAPI EfiMain(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
     GU_RELEASE_OWNER current;
     Stage="owner-recheck";
     GuLogText("Manual U confirmed: release RTX firmware driver once, then revalidate.\n");
+    GuCheckpointReport();
     if(!GuLogReady()){status=EFI_DEVICE_ERROR;goto finish;}
     /* Durable intent precedes the last owner snapshot. No file IO between a
        successful final comparison and DisconnectController. */
@@ -576,7 +611,9 @@ EFI_STATUS EFIAPI EfiMain(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
     status=Step(GuClearMaster());if(EFI_ERROR(status))goto finish;
     Stage="config-after-release";status=Step(ConfigCheck(FALSE));if(EFI_ERROR(status))goto finish;
   }
+  GuEnsureUpstreamBridgeMaster();
   GuLogText("ARMED: one transaction is starting. Do not reset or remove the USB.\n");
+  GuCheckpointReport();
   if(!GuLogReady()){status=EFI_DEVICE_ERROR;goto finish;}
   Stage="transaction";Gu.armed=TRUE;attempted=TRUE;
   UINT64 mask=0xffffffffULL;
@@ -586,11 +623,16 @@ EFI_STATUS EFIAPI EfiMain(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
   if(!result)result=gpu_unlock_610_unlock(&device,&shared);
   /* Also covers failures before GuStarted, including BME-enable readback. */
   EFI_STATUS contained=GuClearMaster();
+  GuRestoreUpstreamBridgeMaster();
   LogContainment();
   GuLog("transaction result=%d containment=%#llx started=%u quiesced=%u fault=%u retained=%u maps=%u FLR=%u\n",
     result,(unsigned long long)contained,Gu.started,Gu.quiesced,Gu.fault,Gu.retained,Gu.dma_count,Gu.flrs);
+  GuCheckpointReport();
   if(EFI_ERROR(contained) || !GuSafeToReturn() || Gu.allocations || (Gu.started && result))Halt();
   gpu_unlock_610_release_shared(&shared);Gu.armed=FALSE;
+  /* Free the 46-84 MB firmware asset cache before GOP reconnect and StartImage
+     so <4 GiB conventional memory is not split during Windows winload.efi boot. */
+  GuReleaseAssets();
   status=result?EFI_DEVICE_ERROR:EFI_SUCCESS;
 finish:
   if(!EFI_ERROR(status) && attempted) {

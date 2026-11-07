@@ -717,7 +717,7 @@ class UniversalUnlockApp(tk.Tk):
         if self.busy:
             return
         self._set_busy(True)
-        self.log("[SCAN] Detecting GPU hardware, PCI topology, BitLocker/SecureBoot, and Windows ESP...")
+        self.log(f"[SCAN] [v{core_detector.APP_VERSION}] Detecting GPU hardware, PCI topology, BitLocker/SecureBoot, and Windows ESP...")
 
         # Full try/except/finally around background detection so busy is always cleared
         def _worker() -> None:
@@ -768,7 +768,7 @@ class UniversalUnlockApp(tk.Tk):
 
                     if info["gpu_detected"]:
                         self.log(
-                            f"[OK] Detected: {info['gpu_name']} | Die={info['die_name']} ({info['support_tier']}) | "
+                            f"[OK] [v{core_detector.APP_VERSION}] Detected: {info['gpu_name']} | Die={info['die_name']} ({info['support_tier']}) | "
                             f"BDF={info['pci_bdf']} | PCI={info['board_id_hex']} | Subsys={info['subsystem_id_hex']} | "
                             f"VRAM={info['vram_mib']} MiB | ESP={info['esp_guid']} ({info['esp_disk_part']})"
                         )
@@ -842,7 +842,7 @@ class UniversalUnlockApp(tk.Tk):
             "esp_part_num": self.hw_info.get("esp_part_num", 0),
             "prom_sha256": self.var_prom_sha.get().strip() or "AUTO",
             "rom_sha256": "AUTO",
-            "unattended_autofire": False,
+            "unattended_autofire": True,
         }
 
     def action_install_deps(self) -> None:
@@ -912,7 +912,7 @@ class UniversalUnlockApp(tk.Tk):
         def _worker() -> None:
             try:
                 self.log("=" * 72)
-                self.log(f"[START] Building UEFI bundle ({target_mode.upper()}) at {target_path} ...")
+                self.log(f"[START] [v{core_detector.APP_VERSION}] Building UEFI bundle ({target_mode.upper()}) at {target_path} ...")
                 staged = core_detector.build_and_stage_usb(cfg, target_path, log_fn=self.log, target_mode=target_mode)
                 self.log(f"[SUCCESS] Bundle ready at {staged} (\\EFI\\Boot\\BOOTX64.EFI + \\GPU-UNLOCK\\ASSETS)")
                 self.log("=" * 72)
@@ -946,7 +946,7 @@ class UniversalUnlockApp(tk.Tk):
                     return
                 self.log("=" * 72)
                 self.log(
-                    f"[REPORT] Loaded {rep['path']} ({rep['run_name']}, all_runs={rep.get('runs')}) | "
+                    f"[REPORT] [UI v{core_detector.APP_VERSION} | EFI v{rep.get('report_version', 'unknown')}] Loaded {rep['path']} ({rep['run_name']}, all_runs={rep.get('runs')}) | "
                     f"PROFILE_MATCHED={rep.get('profile_matched')} | VERIFIED_SUCCESS={rep['success']}"
                 )
                 if rep.get("ss0_line"):

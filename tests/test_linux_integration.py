@@ -231,6 +231,19 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
             core_detector.sha256_bytes(v67_tu),
             "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024",
         )
+        # Verify real NVIDIA 610.43.03 BooterLoadUcode_TU102.c SHA-256 and non-PROD UCODE_IMAGE/UCODE_DESC fallback
+        self.assertEqual(
+            core_detector.SOURCE_C_FILES["g_bindata_kgspGetBinArchiveBooterLoadUcode_TU102.c"][0],
+            "e495483adf66798502667da137c4a24c55f471b86f3183020e3169ff88ad6c89",
+        )
+        sample_tu_boot_c = (
+            "/* DATA SIZE (bytes): 4\n   COMPRESSION: NO */\n"
+            "static const NvU8 BINDATA_LABEL_UCODE_IMAGE_data[] = { 0x11, 0x22, 0x33, 0x44 };\n"
+            "/* DATA SIZE (bytes): 4\n   COMPRESSION: NO */\n"
+            "static const NvU8 BINDATA_LABEL_UCODE_DESC_data[] = { 0x05, 0x00, 0x00, 0x00 };\n"
+        )
+        self.assertEqual(core_detector._array_bytes(sample_tu_boot_c, "UCODE_IMAGE_PROD"), b"\x11\x22\x33\x44")
+        self.assertEqual(core_detector._array_bytes(sample_tu_boot_c, "UCODE_DESC_PROD"), b"\x05\x00\x00\x00")
 
     def test_windows_bat_is_pure_ascii_crlf_and_no_case_collisions(self) -> None:
         bat_raw = (ROOT / "Windows_Launch_UI.bat").read_bytes()

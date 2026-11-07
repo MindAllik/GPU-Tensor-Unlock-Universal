@@ -21,6 +21,8 @@ struct gpu_unlock_fwsec {
 	u32 imem_pa;
 	u32 imem_size;
 	u32 imem_va;
+	u32 imem_sec_base;
+	u32 imem_sec_size;
 	u32 dmem_pa;
 	u32 data_off;
 	u32 dmem_size;

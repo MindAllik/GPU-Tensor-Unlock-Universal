@@ -313,8 +313,17 @@ static EFI_STATUS EFIAPI disconnect(EFI_HANDLE h,EFI_HANDLE agent,EFI_HANDLE chi
     if(app_mode==APP_DECODE_OTHER)config[0x10]^=0x10;
     if(app_mode==APP_DECODE_BME)config[4]|=4;
   }
-  fake.pci_attributes=(config[4]&1?EFI_PCI_IO_ATTRIBUTE_IO:0)|
-    (config[4]&2?EFI_PCI_IO_ATTRIBUTE_MEMORY:0)|(config[4]&4?EFI_PCI_IO_ATTRIBUTE_BUS_MASTER:0);
+  if(extra_case==107) {
+    /* Simulate real RTX 3080 20GB / RTX 3090 GOP Stop() side effects:
+       vendor cap scratch 0x58 and PCIe DEVSTA 0x82 change, and PciIo software
+       attributes lose IO/MEM while hardware command keeps MEM. */
+    *(UINT32*)(config+0x58)^=0x00001000U;
+    *(UINT32*)(config+0x80)^=0x00010000U;
+    fake.pci_attributes=EFI_PCI_IO_ATTRIBUTE_BUS_MASTER;
+  } else {
+    fake.pci_attributes=(config[4]&1?EFI_PCI_IO_ATTRIBUTE_IO:0)|
+      (config[4]&2?EFI_PCI_IO_ATTRIBUTE_MEMORY:0)|(config[4]&4?EFI_PCI_IO_ATTRIBUTE_BUS_MASTER:0);
+  }
   if(app_mode==APP_HANDOFF_PROM)registers[0x300000/4]^=1;
   if(app_mode==APP_HANDOFF_MISSING_PCI)pci.Pci.Read=stale_read;
   return EFI_SUCCESS;

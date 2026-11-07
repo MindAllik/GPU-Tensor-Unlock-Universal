@@ -912,7 +912,16 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 		if (cap & (1u << 30))
 			mb = (mb / 16u) * 15u;
 	}
-	if (!mb ||
+	if (is_tu102(work)) {
+		if (read_bar(work, 0x001fa7c8, &plm) || inaccessible(plm) || !(plm & 1)) {
+			plm = 0; lo = 0; hi = 0;
+		} else if (read_bar(work, 0x001fa82c, &lo) || lo == ~0u ||
+			   read_bar(work, 0x001fa830, &hi) || hi == ~0u) {
+			lo = 0; hi = 0;
+		}
+		if (!mb || read_bar(work, 0x00625f04, &vga) || vga == ~0u)
+			return GU_RESULT(-ENODEV);
+	} else if (!mb ||
 	    read_bar(work, 0x00625f04, &vga) || vga == ~0u ||
 	    read_bar(work, 0x001fa7c8, &plm) || plm == ~0u || !(plm & 1) ||
 	    read_bar(work, 0x001fa82c, &lo) || lo == ~0u ||
@@ -1652,6 +1661,24 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 	ret = gpu_unlock_remove_apertures(work->pdev);
 	if (ret)
 		return GU_RESULT(ret);
+	if (is_tu102(work)) {
+		write_bar(work, 0x001fa828, 0);
+		write_bar(work, 0x001fa824, 0);
+		write_bar(work, feat_plm_offset(work), 0xffffffefu);
+		ret = hold_sec2_reset(work, "post-unlock-turing");
+		if (ret)
+			return GU_RESULT(ret);
+		if (read_bar(work, 0x001fa824, &lo) || inaccessible(lo) ||
+		    read_bar(work, 0x001fa828, &hi) || inaccessible(hi) ||
+		    read_bar(work, feat_ss0_offset(work), &ss0) || inaccessible(ss0) ||
+		    read_bar(work, feat_ss1_offset(work), &ss1) || inaccessible(ss1) ||
+		    read_bar(work, feat_plm_offset(work), &plm) || (plm & 0xffff0000u) == 0xbadf0000u)
+			return GU_RESULT(-ENODEV);
+		if ((hi >> 4) || ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK)
+			return GU_RESULT(-EIO);
+		work->quiesced = true;
+		return 0;
+	}
 	dev_info(&work->pdev->dev, "PCIe FLR begin: BME=0 DMA retained, chip=%#x\n", chip);
 	ret = pcie_flr(work->pdev);
 	dev_info(&work->pdev->dev, "PCIe FLR returned: result=%d\n", ret);

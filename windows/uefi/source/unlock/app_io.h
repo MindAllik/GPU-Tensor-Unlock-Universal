@@ -3,6 +3,8 @@
 #include "port.h"
 EFI_STATUS GuIoOpen(EFI_HANDLE Image,EFI_SYSTEM_TABLE *Table);
 EFI_STATUS GuIoClose(VOID);
+VOID GuCloseLogForHalt(VOID);
+VOID GuCheckpointReport(VOID);
 BOOLEAN GuLocalEsp(EFI_HANDLE Handle);
 BOOLEAN GuIsBootVolume(EFI_HANDLE Handle);
 EFI_STATUS GuLoadAssets(VOID);

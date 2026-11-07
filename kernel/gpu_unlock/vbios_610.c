@@ -148,16 +148,32 @@ static int descriptor(const u8 *rom, size_t length, u64 off,
 		fw.sig_off = off + 44;
 		fw.sig_bytes = size - 44;
 	} else {
-		/* NV_BIT_FALCON_UCODE_DESC_V2: 60 bytes, embedded AES-128 signature */
+		/* NV_BIT_FALCON_UCODE_DESC_V2: 60 bytes, embedded AES-128 signature.
+		 * Real NVIDIA FalconUCodeDescV2 (Turing TU10x / nova-core) stores
+		 * interface_offset at +16, imem_phys_base at +20, imem_load_size at +24,
+		 * imem_virt_base at +28, imem_sec_base at +32, imem_sec_size at +36,
+		 * dmem_offset at +40, dmem_phys_base at +44, dmem_load_size at +48. */
 		if (size != 60)
 			return GU_DIAG(-EOPNOTSUPP);
-		fw.data_off = r32(rom + off + 8);
-		fw.imem_pa = r32(rom + off + 16);
-		fw.imem_size = r32(rom + off + 20);
-		fw.imem_va = r32(rom + off + 24);
-		fw.dmem_pa = r32(rom + off + 28);
-		fw.dmem_size = r32(rom + off + 32);
-		fw.interface_off = r32(rom + off + 40);
+		if (r32(rom + off + 48) != 0) {
+			fw.interface_off = r32(rom + off + 16);
+			fw.imem_pa = r32(rom + off + 20);
+			fw.imem_size = r32(rom + off + 24);
+			fw.imem_va = r32(rom + off + 28);
+			fw.imem_sec_base = r32(rom + off + 32);
+			fw.imem_sec_size = r32(rom + off + 36);
+			fw.data_off = r32(rom + off + 40);
+			fw.dmem_pa = r32(rom + off + 44);
+			fw.dmem_size = r32(rom + off + 48);
+		} else {
+			fw.data_off = r32(rom + off + 8);
+			fw.imem_pa = r32(rom + off + 16);
+			fw.imem_size = r32(rom + off + 20);
+			fw.imem_va = r32(rom + off + 24);
+			fw.dmem_pa = r32(rom + off + 28);
+			fw.dmem_size = r32(rom + off + 32);
+			fw.interface_off = r32(rom + off + 40);
+		}
 		fw.engine_mask = 0x400;
 		fw.ucode_id = 9;
 	}

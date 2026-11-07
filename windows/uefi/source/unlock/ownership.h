@@ -25,4 +25,6 @@ EFI_STATUS GuFindReleaseOwner(EFI_SYSTEM_TABLE *Table,GU_RELEASE_OWNER *Owner,BO
 BOOLEAN GuSameReleaseOwner(const GU_RELEASE_OWNER *A,const GU_RELEASE_OWNER *B);
 /* Caller holds TPL_NOTIFY through fresh resolution/validation and any BME clear. */
 EFI_STATUS GuRefreshTargetPci(VOID);
+VOID GuEnsureUpstreamBridgeMaster(VOID);
+VOID GuRestoreUpstreamBridgeMaster(VOID);
 #endif

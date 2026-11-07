@@ -292,8 +292,25 @@ int gpu_unlock_boot_desc_parse(const u8 *data, size_t size, u32 image_size,
 	static const unsigned int ranges[] = { 1, 3, 8, 10, 12 };
 	unsigned int i;
 
-	if (!data || !out || size != 84 || !image_size ||
-	    rd32(data) != 5 || rd32(data + 56) != 1 ||
+	if (!data || !out || !image_size)
+		return GU_DIAG(-EINVAL);
+	if (size == 76) {
+		/* RM_RISCV_UCODE_DESC v4 (76 bytes) used on Turing TU102 / GA100 */
+		u32 m_off = rd32(data + 32), d_off = rd32(data + 40), c_off = rd32(data + 48);
+		if (m_off >= image_size || d_off >= image_size || c_off >= image_size) {
+			m_off = rd32(data + 24);
+			d_off = rd32(data + 32);
+			c_off = rd32(data + 40);
+		}
+		if (m_off >= image_size || d_off >= image_size || c_off >= image_size)
+			return GU_DIAG(-ERANGE);
+		out->manifest_offset = m_off;
+		out->data_offset = d_off;
+		out->code_offset = c_off;
+		out->image_size = image_size;
+		return 0;
+	}
+	if (size != 84 || rd32(data) != 5 || rd32(data + 56) != 1 ||
 	    rd32(data + 76) != image_size || rd32(data + 80))
 		return GU_DIAG(-EINVAL);
 	for (i = 0; i < sizeof(ranges) / sizeof(ranges[0]); i++) {

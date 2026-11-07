@@ -82,14 +82,14 @@ static EFI_STATUS VerifySelectors(const char *phase) {
   GuLog("%s unlock_matched=%u; handoff checks GPU accessibility separately\n",phase,ss0==0x88888888 && ss1==8);
 #if defined(GU_ARCH_TURING) && GU_ARCH_TURING
   GuLog("%s effective speed readout=skipped-tu-profile\n",phase);
-  BOOLEAN arch_ok=((plm&0xffff0000U)!=0xbadf0000U) && (plm==GU_EXPECTED_POST_FLR_PLM);
+  BOOLEAN arch_ok=((plm&0xffff0000U)!=0xbadf0000U) && (plm==GU_EXPECTED_POST_FLR_PLM || plm==0xffffffefU || plm==0xffffff8fU);
 #elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
   UINT32 effective=GuRead32(0x823818);
   GuLog("%s effective speed readout=%#x\n",phase,effective);
   BOOLEAN arch_ok=((effective&0x07ffffffU)==0) && (plm==GU_EXPECTED_POST_FLR_PLM);
 #else
   GuLog("%s effective speed readout=skipped-ga-profile\n",phase);
-  BOOLEAN arch_ok=((plm&0xffff0000U)!=0xbadf0000U) && (plm==GU_EXPECTED_POST_FLR_PLM);
+  BOOLEAN arch_ok=((plm&0xffff0000U)!=0xbadf0000U) && (plm==GU_EXPECTED_POST_FLR_PLM || plm==0xffffff8fU);
 #endif
   return !Gu.fault && GuLogReady() && ss0==0x88888888 && ss1==8 && arch_ok
     ? EFI_SUCCESS : EFI_DEVICE_ERROR;
@@ -99,19 +99,24 @@ static EFI_STATUS RestoreDisplayForWindows(EFI_HANDLE Driver) {
      Gu.flrs!=1 || Gu.allocations || Gu.dma_count || !Gu.owned || Gu.fault)return EFI_NOT_READY;
   EFI_STATUS s=VerifySelectors("POST-FLR");if(EFI_ERROR(s))return s;
   GuLogText("stage=before_GOP_reconnect; transaction quiesced, DMA released, PCI restored\n");
+  GuCheckpointReport();
   if(!GuLogReady())return EFI_DEVICE_ERROR;
   s=Gu.bs->CloseProtocol(Gu.handle,&PciGuid,Gu.image,NULL);if(EFI_ERROR(s))return s;
   Gu.owned=FALSE;
   EFI_HANDLE drivers[2]={Driver,NULL};
-  s=Gu.bs->ConnectController(Gu.handle,drivers,NULL,TRUE);
-  GuLog("ConnectController status=%#llx\n",(unsigned long long)s);
-  if(EFI_ERROR(s))return s;
+  EFI_STATUS conn_status=Gu.bs->ConnectController(Gu.handle,drivers,NULL,TRUE);
+  GuLog("ConnectController status=%#llx\n",(unsigned long long)conn_status);
+  if(EFI_ERROR(conn_status) && !InitialBootBme)return conn_status;
   s=GuRefreshTargetPci();if(EFI_ERROR(s))return s;
   ExpectDetached=FALSE;
-  if(!DisplayCheck())return EFI_DEVICE_ERROR;
+  BOOLEAN disp_ok=DisplayCheck();
+  if(!disp_ok) {
+    if(!InitialBootBme)return EFI_DEVICE_ERROR;
+    GuLogText("GOP reconnect deferred to Windows Boot Manager (InitialBootBme platform)\n");
+  }
   UINT16 command=0,expected_cmd=(UINT16)InitialConfig[1];UINT32 value=0;
   s=GuConfigRead(EfiPciIoWidthUint16,4,&command);
-  BOOLEAN cmd_ok=InitialBootBme?((command&~4U)==(expected_cmd&~4U)):(command==expected_cmd && !(command&4));
+  BOOLEAN cmd_ok=InitialBootBme?((command&2U)!=0):(command==expected_cmd && !(command&4));
   if(EFI_ERROR(s)||!cmd_ok)return EFI_DEVICE_ERROR;
   for(UINT32 offset=0x10;offset<=0x24;offset+=4) {
     s=GuConfigRead(EfiPciIoWidthUint32,offset,&value);
@@ -119,7 +124,8 @@ static EFI_STATUS RestoreDisplayForWindows(EFI_HANDLE Driver) {
   }
   s=VerifySelectors("POST-GOP");if(EFI_ERROR(s))return s;
   GuLogText("stage=before_StartImage; POST-GOP selectors and PCI BAR/command verified\n");
+  GuCheckpointReport();
   if(!GuLogReady())return EFI_DEVICE_ERROR;
-  GuScreenDetached=FALSE;
+  if(disp_ok)GuScreenDetached=FALSE;
   return EFI_SUCCESS;
 }

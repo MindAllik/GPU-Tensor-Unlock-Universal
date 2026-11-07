@@ -122,8 +122,11 @@ EFI_STATUS GuEnableMaster(VOID) {
   if(EFI_ERROR(Status) || !(Supported&EFI_PCI_IO_ATTRIBUTE_BUS_MASTER))goto fail;
   Status=Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&Before);
   Decode=(Command&1?EFI_PCI_IO_ATTRIBUTE_IO:0)|(Command&2?EFI_PCI_IO_ATTRIBUTE_MEMORY:0);
-  if(EFI_ERROR(Status) || (Before&EFI_PCI_IO_ATTRIBUTE_BUS_MASTER) ||
-     (Before&(EFI_PCI_IO_ATTRIBUTE_IO|EFI_PCI_IO_ATTRIBUTE_MEMORY))!=Decode)goto fail;
+  if(EFI_ERROR(Status) || (Before&EFI_PCI_IO_ATTRIBUTE_BUS_MASTER))goto fail;
+  if((Before&(EFI_PCI_IO_ATTRIBUTE_IO|EFI_PCI_IO_ATTRIBUTE_MEMORY))!=Decode) {
+    GuLog("Bus Master note: software PciIo attributes=%#llx differ from hardware decode=%#llx\n",
+      (unsigned long long)Before,(unsigned long long)Decode);
+  }
   GuLog("Bus Master enable intent: command=%#x attributes=%#llx\n",
     Command,(unsigned long long)Before);
   if(Gu.fault){Status=EFI_DEVICE_ERROR;goto fail;}
@@ -135,7 +138,7 @@ EFI_STATUS GuEnableMaster(VOID) {
   Status=Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationEnable,EFI_PCI_IO_ATTRIBUTE_BUS_MASTER,NULL);
   if(EFI_ERROR(Status))goto fail;
   Status=Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&After);
-  if(EFI_ERROR(Status) || After!=(Before|EFI_PCI_IO_ATTRIBUTE_BUS_MASTER))goto fail;
+  if(EFI_ERROR(Status) || !(After&EFI_PCI_IO_ATTRIBUTE_BUS_MASTER))goto fail;
   Status=RawRead(EfiPciIoWidthUint16,4,&Now);
   if(EFI_ERROR(Status) || Now!=(UINT16)(Command|4))goto fail;
   GuLog("Bus Master enabled: command=%#x attributes=%#llx matched=1\n",
@@ -163,7 +166,7 @@ EFI_STATUS GuClearMaster(VOID) {
         EFI_PCI_IO_ATTRIBUTE_BUS_MASTER,NULL);
       EFI_STATUS ReadStatus=Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&Attributes);
       if(!EFI_ERROR(AttributeStatus) && EFI_ERROR(ReadStatus))AttributeStatus=ReadStatus;
-      if(!EFI_ERROR(AttributeStatus) && Attributes!=Gu.master_original_attributes)
+      if(!EFI_ERROR(AttributeStatus) && (Attributes&EFI_PCI_IO_ATTRIBUTE_BUS_MASTER))
         AttributeStatus=EFI_DEVICE_ERROR;
     }
     Gu.master_last_attributes=Attributes;

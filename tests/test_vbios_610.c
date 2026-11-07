@@ -138,6 +138,30 @@ int main(int argc, char **argv)
 		assert(v2fw.image_off == 256 + 60 && v2fw.image_size == 1280);
 		assert(v2fw.sig_count == 0 && v2fw.engine_mask == 0x400 && v2fw.ucode_id == 9);
 	}
+	/* Verify real NVIDIA FalconUCodeDescV2 layout (nova-core / TU102 VBIOS). */
+	{
+		u8 v2real[4096] = {0};
+		struct gpu_unlock_fwsec v2fw;
+		vbios_fixture(v2real, 6);
+		w32(v2real + 256, 0x003c0201); /* ver=2, size=60 */
+		w32(v2real + 260, 1280);       /* +4: stored_size */
+		w32(v2real + 264, 1280);       /* +8: uncompressed_size */
+		w32(v2real + 268, 0x200);      /* +12: virtual_entry */
+		w32(v2real + 272, 16);         /* +16: interface_offset */
+		w32(v2real + 276, 0);          /* +20: imem_phys_base */
+		w32(v2real + 280, 512);        /* +24: imem_load_size */
+		w32(v2real + 284, 0x200);      /* +28: imem_virt_base */
+		w32(v2real + 288, 0x200);      /* +32: imem_sec_base */
+		w32(v2real + 292, 512);        /* +36: imem_sec_size */
+		w32(v2real + 296, 512);        /* +40: dmem_offset */
+		w32(v2real + 300, 0);          /* +44: dmem_phys_base */
+		w32(v2real + 304, 768);        /* +48: dmem_load_size */
+		assert(!gpu_unlock_vbios_fwsec(v2real, sizeof(v2real), &v2fw));
+		assert(v2fw.image_off == 256 + 60 && v2fw.image_size == 1280);
+		assert(v2fw.imem_size == 512 && v2fw.data_off == 512 && v2fw.dmem_size == 768);
+		assert(v2fw.imem_sec_base == 0x200 && v2fw.imem_sec_size == 512);
+		assert(v2fw.interface_off == 16 && v2fw.sig_count == 0);
+	}
 	puts("vbios valid-chain, malformed range, patch and signature checks passed");
 	return 0;
 }

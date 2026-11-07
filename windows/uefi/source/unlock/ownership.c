@@ -187,3 +187,57 @@ EFI_STATUS GuRefreshTargetPci(VOID) {
   if(!GuTargetConfig(config,segment,bus,device,function))return EFI_UNSUPPORTED;
   Gu.pci=fresh;return EFI_SUCCESS;
 }
+typedef struct {
+  EFI_PCI_IO_PROTOCOL *pci;
+  UINT16 original_cmd;
+  UINTN seg,bus,dev,func;
+} GU_SAVED_BRIDGE;
+static GU_SAVED_BRIDGE SavedBridges[8];
+static UINTN SavedBridgeCount;
+VOID GuEnsureUpstreamBridgeMaster(VOID) {
+  SavedBridgeCount=0;
+  if(!Gu.bs || !Gu.bs->LocateHandleBuffer || !Gu.bs->HandleProtocol || !Gu.handle || Gu.fault || GU_BOARD_BUS==0)return;
+  EFI_DEVICE_PATH_PROTOCOL *gpu_path=NULL;
+  if(EFI_ERROR(Gu.bs->HandleProtocol(Gu.handle,&PathGuid,(VOID **)&gpu_path)) || !gpu_path)return;
+  EFI_HANDLE *handles=NULL;UINTN count=0;
+  if(EFI_ERROR(Gu.bs->LocateHandleBuffer(ByProtocol,&PciGuid,NULL,&count,&handles)) || !handles)return;
+  for(UINTN i=0;i<count && SavedBridgeCount<8;i++) {
+    if(handles[i]==Gu.handle)continue;
+    EFI_PCI_IO_PROTOCOL *bpci=NULL;
+    if(EFI_ERROR(Gu.bs->HandleProtocol(handles[i],&PciGuid,(VOID **)&bpci)) || !bpci ||
+       !bpci->GetLocation || !bpci->Pci.Read || !bpci->Pci.Write)continue;
+    UINTN seg=0,bus=0,dev=0,func=0;
+    if(EFI_ERROR(bpci->GetLocation(bpci,&seg,&bus,&dev,&func)) || seg!=GU_BOARD_SEGMENT || bus>=GU_BOARD_BUS)continue;
+    UINT32 hdr=0,buses=0;
+    if(EFI_ERROR(bpci->Pci.Read(bpci,EfiPciIoWidthUint32,0x0c,1,&hdr)) || (((hdr>>16)&0x7fU)!=0x01U))continue;
+    if(EFI_ERROR(bpci->Pci.Read(bpci,EfiPciIoWidthUint32,0x18,1,&buses)))continue;
+    UINT32 sec_bus=(buses>>8)&0xffU,sub_bus=(buses>>16)&0xffU;
+    if(sec_bus==0 || sec_bus>GU_BOARD_BUS || GU_BOARD_BUS>sub_bus)continue;
+    UINT16 cmd=0xffff;
+    if(EFI_ERROR(bpci->Pci.Read(bpci,EfiPciIoWidthUint16,0x04,1,&cmd)) || cmd==0xffffU)continue;
+    if((cmd&0x0006U)!=0x0006U) {
+      UINT16 wanted=(UINT16)(cmd|0x0006U);
+      if(!EFI_ERROR(bpci->Pci.Write(bpci,EfiPciIoWidthUint16,0x04,1,&wanted))) {
+        SavedBridges[SavedBridgeCount].pci=bpci;
+        SavedBridges[SavedBridgeCount].original_cmd=cmd;
+        SavedBridges[SavedBridgeCount].seg=seg;
+        SavedBridges[SavedBridgeCount].bus=bus;
+        SavedBridges[SavedBridgeCount].dev=dev;
+        SavedBridges[SavedBridgeCount].func=func;
+        SavedBridgeCount++;
+        GuLog("upstream bridge BDF=%zu:%zu:%zu.%zu [sec=%u..sub=%u] BusMaster/Mem enabled: %#x -> %#x\n",
+          seg,bus,dev,func,sec_bus,sub_bus,cmd,wanted);
+      }
+    }
+  }
+  GuFree(handles);
+}
+VOID GuRestoreUpstreamBridgeMaster(VOID) {
+  while(SavedBridgeCount>0) {
+    SavedBridgeCount--;
+    GU_SAVED_BRIDGE *b=&SavedBridges[SavedBridgeCount];
+    if(b->pci && b->pci->Pci.Write) {
+      b->pci->Pci.Write(b->pci,EfiPciIoWidthUint16,0x04,1,&b->original_cmd);
+    }
+  }
+}

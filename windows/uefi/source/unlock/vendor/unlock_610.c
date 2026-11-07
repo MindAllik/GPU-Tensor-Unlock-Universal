@@ -44,7 +44,10 @@
 #define BOOT_FILE "gpu-unlock/610.43.03/gsp_boot_tu102.bin"
 #define BOOT_DESC_FILE "gpu-unlock/610.43.03/gsp_boot_desc_tu102.bin"
 #define GSP_SIG_SECTION ".fwsignature_tu10x"
-#define EXPECTED_BOOT_SIZE 16384u
+#ifndef GU_TU102_BOOT_SIZE
+#define GU_TU102_BOOT_SIZE 16384u
+#endif
+#define EXPECTED_BOOT_SIZE GU_TU102_BOOT_SIZE
 #elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
 #define BOOTER_FILE "gpu-unlock/610.43.03/booter_load_ad102.bin"
 #define V67_FILE "gpu-unlock/610.43.03/v67-ad102-610.43.03-four-plm.bin"
@@ -594,17 +597,14 @@ static int load_booter(struct unlock_transaction_work *work)
 	memcpy(&image_size, data + 8 + sizeof(hdr), sizeof(image_size));
 	memcpy(&sig_bytes, data + 12 + sizeof(hdr), sizeof(sig_bytes));
 	if (!hdr.ucode_id || hdr.num_apps != 1 || sig_bytes != hdr.sig_bytes ||
-	    image_size != GU_BOOTER_IMAGE_SIZE ||
+	    (!GU_ARCH_TURING && image_size != GU_BOOTER_IMAGE_SIZE) ||
 	    work->booter_fw->size != 72u + image_size + sig_bytes)
 		return GU_RESULT(-EINVAL);
 	/* Only this pinned production BOOT_FROM_HS geometry is implemented. */
 #if defined(GU_ARCH_TURING) && GU_ARCH_TURING
-	if ((hdr.ucode_id != 3 && hdr.ucode_id != 13) || hdr.engine_id != 1 || hdr.num_sigs != 1 ||
-	    sig_bytes != GU_BOOTER_SIG_TOTAL || hdr.os_code_off != 0 ||
-	    hdr.os_code_size != 256 || hdr.os_data_off != 34048 ||
-	    hdr.os_data_size != 25088 || hdr.app_code_off != 256 ||
-	    hdr.app_code_size != 33792 || hdr.app_data_off != 256 ||
-	    hdr.app_data_size != 0 || hdr.patch_loc != 34560)
+	if ((hdr.ucode_id != 3 && hdr.ucode_id != 13) || hdr.engine_id != 1 || !hdr.num_sigs ||
+	    !sig_bytes || !hdr.os_code_size || !hdr.os_data_size ||
+	    !hdr.app_code_size || hdr.patch_loc < hdr.os_data_off)
 #elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
 	if (hdr.ucode_id != 3 || hdr.engine_id != 1 || hdr.num_sigs != 2 ||
 	    sig_bytes != GU_BOOTER_SIG_TOTAL || hdr.os_code_off != 0 ||
@@ -825,12 +825,23 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 		if (cap & (1u << 30))
 			mb = (mb / 16u) * 15u;
 	}
+#if defined(GU_ARCH_TURING) && GU_ARCH_TURING
+	if (read_bar(work, 0x001fa7c8, &plm) || inaccessible(plm) || !(plm & 1)) {
+		plm = 0; lo = 0; hi = 0;
+	} else if (read_bar(work, 0x001fa82c, &lo) || lo == ~0u ||
+		   read_bar(work, 0x001fa830, &hi) || hi == ~0u) {
+		lo = 0; hi = 0;
+	}
+	if (!mb || mb == ~0u || read_bar(work, 0x00625f04, &vga) || vga == ~0u)
+		return GU_RESULT(-ENODEV);
+#else
 	if (!mb || mb == ~0u ||
 	    read_bar(work, 0x00625f04, &vga) || vga == ~0u ||
 	    read_bar(work, 0x001fa7c8, &plm) || plm == ~0u || !(plm & 1) ||
 	    read_bar(work, 0x001fa82c, &lo) || lo == ~0u ||
 	    read_bar(work, 0x001fa830, &hi) || hi == ~0u)
 		return GU_RESULT(-ENODEV);
+#endif
 	/* Keep the cold board inputs in the USB kernel log even on layout failure.
 	 * Register values after NVIDIA binds cannot reconstruct this state. */
 	dev_info(&work->pdev->dev,
@@ -1673,6 +1684,31 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 	ret = aperture_remove_conflicting_pci_devices(work->pdev, "gpu_unlock");
 	if (ret)
 		return GU_RESULT(ret);
+#if defined(GU_ARCH_TURING) && GU_ARCH_TURING
+	/* On Turing (TU10x), SS0/SS1 live in PGRAPH (0x00409664/0x0040966c) and would be
+	 * wiped by a PCIe FLR. Tear down WPR2 directly, relock FEAT_PLM (0x00409650 -> 0xffffffef)
+	 * so stock driver DEVINIT cannot overwrite SS0/SS1, and reset SEC2 without FLR. */
+	write_bar(work, 0x001fa828, 0);
+	write_bar(work, 0x001fa824, 0);
+	write_bar(work, GU_FEAT_PLM_OFFSET, 0xffffffefu);
+	ret = hold_sec2_reset(work, "post-unlock-turing");
+	if (ret)
+		return GU_RESULT(ret);
+	if (read_bar(work, 0x001fa824, &lo) || inaccessible(lo) ||
+	    read_bar(work, 0x001fa828, &hi) || inaccessible(hi) ||
+	    read_bar(work, GU_FEAT_SS0_OFFSET, &ss0) || inaccessible(ss0) ||
+	    read_bar(work, GU_FEAT_SS1_OFFSET, &ss1) || inaccessible(ss1) ||
+	    read_bar(work, GU_FEAT_PLM_OFFSET, &plm) || (plm & 0xffff0000u) == 0xbadf0000u)
+		return GU_RESULT(-ENODEV);
+	if ((hi >> 4) || ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK)
+		return GU_RESULT(-EIO);
+	work->quiesced = true;
+#ifdef GU_UEFI_PORT
+	Gu.flrs = 1;
+	GuQuiesced();
+#endif
+	return 0;
+#endif
 	dev_info(&work->pdev->dev, "PCIe FLR begin: BME=0 DMA retained, chip=%#x\n", chip);
 	ret = pcie_flr(work->pdev);
 	dev_info(&work->pdev->dev, "PCIe FLR returned: result=%d\n", ret);

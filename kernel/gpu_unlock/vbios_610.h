@@ -20,6 +20,8 @@ struct gpu_unlock_fwsec {
 	u32 imem_pa;
 	u32 imem_size;
 	u32 imem_va;
+	u32 imem_sec_base;
+	u32 imem_sec_size;
 	u32 dmem_pa;
 	u32 data_off;
 	u32 dmem_size;
@@ -38,5 +40,7 @@ int gpu_unlock_fwsec_patch_frts(u8 *image, const struct gpu_unlock_fwsec *fw,
 				u64 frts_offset);
 int gpu_unlock_fwsec_sig_offset(u32 versions, u32 fuse_version, u32 sig_size,
 				u32 *offset);
+
+int gpu_unlock_fwsec_dmem_transfer(const struct gpu_unlock_fwsec *fw, u32 *bytes);
 
 #endif

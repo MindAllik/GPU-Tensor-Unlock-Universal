@@ -18,12 +18,36 @@ static BOOLEAN LogFault;
 BOOLEAN GuScreenDetached;
 typedef struct {const char *name;CHAR16 *file;UINTN size;const char *hash;} ASSET_SPEC;
 #if defined(GU_ARCH_TURING) && GU_ARCH_TURING
+#ifndef GU_TU102_BOOTER_SIZE
+#define GU_TU102_BOOTER_SIZE 59224U
+#endif
+#ifndef GU_TU102_BOOTER_HASH
+#define GU_TU102_BOOTER_HASH "a5cd2eb6a92f343003eb3da67905318dc24f59f77dc02fb48b6389098fbffdb5"
+#endif
+#ifndef GU_TU102_GSP_SIZE
+#define GU_TU102_GSP_SIZE 46778072U
+#endif
+#ifndef GU_TU102_GSP_HASH
+#define GU_TU102_GSP_HASH "d9d9e0f23ccaa9f82e6879c97a7fb0962a421f7b713ba9ff2169641d34ef47be"
+#endif
+#ifndef GU_TU102_BOOT_SIZE
+#define GU_TU102_BOOT_SIZE 16384U
+#endif
+#ifndef GU_TU102_BOOT_HASH
+#define GU_TU102_BOOT_HASH "b2bdccbb79ad4dd48d85c35b00d9ccdf34625bd323805be3f9045a4a24d09fa5"
+#endif
+#ifndef GU_TU102_BOOT_DESC_SIZE
+#define GU_TU102_BOOT_DESC_SIZE 84U
+#endif
+#ifndef GU_TU102_BOOT_DESC_HASH
+#define GU_TU102_BOOT_DESC_HASH "d66ab92e021b08d58045569df6956ef1bc742c57e7b31736b172578df87eb0e8"
+#endif
 static const ASSET_SPEC Specs[]={
- {"gpu-unlock/610.43.03/booter_load_tu102.bin",L"ASSETS\\booter_load_tu102.bin",59224,"a5cd2eb6a92f343003eb3da67905318dc24f59f77dc02fb48b6389098fbffdb5"},
+ {"gpu-unlock/610.43.03/booter_load_tu102.bin",L"ASSETS\\booter_load_tu102.bin",GU_TU102_BOOTER_SIZE,GU_TU102_BOOTER_HASH},
  {"gpu-unlock/610.43.03/v67-tu102-610.43.03.bin",L"ASSETS\\v67-tu102-610.43.03.bin",64000,"54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024"},
- {"gpu-unlock/610.43.03/gsp_tu10x.bin",L"ASSETS\\gsp_tu10x.bin",46778072,"d9d9e0f23ccaa9f82e6879c97a7fb0962a421f7b713ba9ff2169641d34ef47be"},
- {"gpu-unlock/610.43.03/gsp_boot_tu102.bin",L"ASSETS\\gsp_boot_tu102.bin",16384,"b2bdccbb79ad4dd48d85c35b00d9ccdf34625bd323805be3f9045a4a24d09fa5"},
- {"gpu-unlock/610.43.03/gsp_boot_desc_tu102.bin",L"ASSETS\\gsp_boot_desc_tu102.bin",84,"d66ab92e021b08d58045569df6956ef1bc742c57e7b31736b172578df87eb0e8"}
+ {"gpu-unlock/610.43.03/gsp_tu10x.bin",L"ASSETS\\gsp_tu10x.bin",GU_TU102_GSP_SIZE,GU_TU102_GSP_HASH},
+ {"gpu-unlock/610.43.03/gsp_boot_tu102.bin",L"ASSETS\\gsp_boot_tu102.bin",GU_TU102_BOOT_SIZE,GU_TU102_BOOT_HASH},
+ {"gpu-unlock/610.43.03/gsp_boot_desc_tu102.bin",L"ASSETS\\gsp_boot_desc_tu102.bin",GU_TU102_BOOT_DESC_SIZE,GU_TU102_BOOT_DESC_HASH}
 };
 #elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
 static const ASSET_SPEC Specs[]={
@@ -45,11 +69,18 @@ static const ASSET_SPEC Specs[]={
 static VOID LogError(VOID){LogFault=TRUE;if(Gu.armed)Gu.fault=TRUE;}
 VOID GuConsole(const char *Text) {
   if(GuScreenDetached)return;
-  if(!Table || !Table->ConOut || !Table->ConOut->OutputString){LogError();return;}
+  if(!Table || !Table->ConOut || !Table->ConOut->OutputString)return;
   while(*Text) {
     CHAR16 line[128];UINTN n=0;
-    while(*Text && n<126){if(*Text=='\n')line[n++]='\r';line[n++]=(UINT8)*Text++;}
-    line[n]=0;if(EFI_ERROR(Table->ConOut->OutputString(Table->ConOut,line))){LogError();return;}
+    while(*Text && n<126) {
+      UINT8 ch=(UINT8)*Text++;
+      if(ch=='\n')line[n++]='\r';
+      line[n++]=(ch>=0x80U)?(CHAR16)'-':(CHAR16)ch;
+    }
+    line[n]=0;
+    /* Never latch LogFault on console OutputString glyph warnings/errors;
+       REPORT.TXT logging and hardware unlock must not be aborted by ConOut. */
+    Table->ConOut->OutputString(Table->ConOut,line);
   }
 }
 VOID GuLogText(const char *Text) {
@@ -58,6 +89,11 @@ VOID GuLogText(const char *Text) {
   UINTN expected=strlen(Text),written=expected;
   EFI_STATUS status=Report->Write(Report,&written,(VOID *)Text);
   if(EFI_ERROR(status) || written!=expected || EFI_ERROR(Report->Flush(Report)))LogError();
+  else {
+    if(Run)Run->Flush(Run);
+    if(Parent)Parent->Flush(Parent);
+    if(Root)Root->Flush(Root);
+  }
 }
 VOID GuLog(const char *Format,...) {
   char text[1024];va_list args;va_start(args,Format);
@@ -66,6 +102,34 @@ VOID GuLog(const char *Format,...) {
   GuLogText(text);
 }
 BOOLEAN GuLogReady(VOID){return Report && !LogFault;}
+VOID GuCheckpointReport(VOID) {
+  if(!Report || !Run || LogFault || Gu.retained)return;
+  Report->Flush(Report);
+  Run->Flush(Run);
+  if(Parent)Parent->Flush(Parent);
+  if(Root)Root->Flush(Root);
+  /* On real UEFI FAT32 (EnhancedFatDxe), EFI_FILE_PROTOCOL.Flush() may leave
+     DIR_FileSize uncommitted in the directory entry until Close() is called.
+     Close and immediately reopen REPORT.TXT at EOF when SetPosition is present. */
+  if(Report->SetPosition) {
+    EFI_FILE_PROTOCOL *reopened=NULL;
+    Report->Close(Report);
+    Report=NULL;
+    Run->Flush(Run);
+    if(Parent)Parent->Flush(Parent);
+    if(Root)Root->Flush(Root);
+    if(!EFI_ERROR(Run->Open(Run,&reopened,L"REPORT.TXT",EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE,0)) && reopened) {
+      if(!EFI_ERROR(reopened->SetPosition(reopened,0xffffffffffffffffULL))) {
+        Report=reopened;
+      } else {
+        reopened->Close(reopened);
+        LogError();
+      }
+    } else {
+      LogError();
+    }
+  }
+}
 static BOOLEAN UsbPath(EFI_HANDLE Handle) {
   EFI_DEVICE_PATH_PROTOCOL *path=NULL;
   if(EFI_ERROR(Table->BootServices->HandleProtocol(Handle,&PathGuid,(VOID **)&path)) || !path)return FALSE;
@@ -194,17 +258,11 @@ EFI_STATUS GuIoOpen(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
       if(EFI_ERROR(status) || !proot)status=EFI_DEVICE_ERROR;
       if(!EFI_ERROR(status))status=proot->Open(proot,&pparent,L"\\GPU-UNLOCK",EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE,0);
       if(EFI_ERROR(status) || !pparent) {
-        /* abandon the candidate without ever switching roots; a failed Close
-           here is a leak on a volume we are dropping, not fatal to the run. */
         if(pparent)pparent->Close(pparent);
         if(proot && proot!=pparent)proot->Close(proot);
         Table->BootServices->FreePool(hs);
         return EFI_ERROR(status)?status:EFI_DEVICE_ERROR;
       }
-      /* The load volume's root is no longer needed. Close it and CHECK the
-         result before adopting the payload root: Close invalidates the handle
-         even on error, so on failure we null Root and bail rather than leave
-         GuIoClose facing a half-switched pair. */
       status=Root->Close(Root);
       if(EFI_ERROR(status)) {
         pparent->Close(pparent);proot->Close(proot);Root=NULL;
@@ -233,8 +291,8 @@ EFI_STATUS GuIoOpen(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
     if(status!=EFI_NOT_FOUND)return status;
     status=Run->Open(Run,&Report,L"REPORT.TXT",EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE|EFI_FILE_MODE_CREATE,0);
     if(EFI_ERROR(status) || !Report)return EFI_DEVICE_ERROR;
-    GuLog("NVIDIA GPU TENSOR UNLOCK / UEFI PRE-BOOT TRANSACTION\nRUN%02u\nRUN_ID=RUN%02u BOARD_ID=%#x SUBSYSTEM=%#x BDF=%u:%u:%u.%u ARCH=%s\n[STAGE 1/3] PREFLIGHT & ASSET LOADING: verifying VBIOS and reading firmware from USB... Please wait (do NOT press keys yet). Confirmation mode=%s.\n",
-      (unsigned)slot,(unsigned)slot,(unsigned)GU_BOARD_ID,(unsigned)GU_BOARD_SUBSYSTEM,
+    GuLog("NVIDIA GPU TENSOR UNLOCK / UEFI PRE-BOOT TRANSACTION v%s\nRUN%02u\nRUN_ID=RUN%02u VERSION=%s BOARD_ID=%#x SUBSYSTEM=%#x BDF=%u:%u:%u.%u ARCH=%s\n[STAGE 1/3] PREFLIGHT & ASSET LOADING: verifying VBIOS and reading firmware from USB... Please wait (do NOT press keys yet). Confirmation mode=%s.\n",
+      GU_APP_VERSION,(unsigned)slot,(unsigned)slot,GU_APP_VERSION,(unsigned)GU_BOARD_ID,(unsigned)GU_BOARD_SUBSYSTEM,
       (unsigned)GU_BOARD_SEGMENT,(unsigned)GU_BOARD_BUS,(unsigned)GU_BOARD_DEVICE,(unsigned)GU_BOARD_FUNCTION,
       GU_ARCH_TURING?"TURING":(GU_ARCH_ADA?"ADA":"AMPERE"),KOH_UNATTENDED_AUTOFIRE?"unattended":"manual");
     GuLogText("PIO readback is not an execution gate. This path does not independently verify TCM contents; FWSEC scratch/WPR results are required.\n");
@@ -295,6 +353,18 @@ EFI_STATUS GuLoadAssets(VOID) {
 VOID GuReleaseAssets(VOID) {
   if(!GuSafeToReturn())return;
   for(UINTN i=0;i<5;i++){GuFree((VOID *)GuAssets[i].firmware.data);memset(&GuAssets[i],0,sizeof(GuAssets[i]));}
+}
+VOID GuCloseLogForHalt(VOID) {
+  EFI_FILE_PROTOCOL **files[]={&Report,&Run,&Parent,&Root};
+  BOOLEAN saved_retained=Gu.retained;
+  Gu.retained=FALSE;
+  BootDeviceHandle=NULL;
+  for(UINTN i=0;i<4;i++)if(*files[i]) {
+    EFI_FILE_PROTOCOL *file=*files[i];*files[i]=NULL;
+    file->Flush(file);
+    file->Close(file);
+  }
+  Gu.retained=saved_retained;
 }
 EFI_STATUS GuIoClose(VOID) {
   EFI_FILE_PROTOCOL **files[]={&Report,&Run,&Parent,&Root};EFI_STATUS result=EFI_SUCCESS;

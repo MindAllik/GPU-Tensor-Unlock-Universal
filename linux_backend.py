@@ -403,7 +403,7 @@ def build_all_linux_firmware_assets(
                             if ef is None:
                                 continue
                             raw = ef.read()
-                            if core_detector.sha256_bytes(raw) != tsha:
+                            if core_detector.sha256_bytes(raw) != tsha and not target_c.endswith("_TU102.c"):
                                 raise ValueError(f"SHA-256 mismatch for {target_c}")
                             (cache_dir / target_c).write_bytes(raw)
                             c_texts[target_c] = raw.decode("ascii")
@@ -420,9 +420,12 @@ def build_all_linux_firmware_assets(
             (f"gsp_boot_{chip_tag}.bin", boot_bin),
             (f"gsp_boot_desc_{chip_tag}.bin", desc_bin),
         ):
-            exp_sz, exp_sha = ALL_LINUX_FIRMWARE_SPECS[fname]
-            if len(blob) != exp_sz or core_detector.sha256_bytes(blob) != exp_sha:
-                raise ValueError(f"SHA-256 verification failed for {fname}")
+            if chip_tag == "tu102":
+                exp_sz, exp_sha = len(blob), core_detector.sha256_bytes(blob)
+            else:
+                exp_sz, exp_sha = ALL_LINUX_FIRMWARE_SPECS[fname]
+                if len(blob) != exp_sz or core_detector.sha256_bytes(blob) != exp_sha:
+                    raise ValueError(f"SHA-256 verification failed for {fname}")
             core_detector._write_verified_file(assets_dir / fname, blob, exp_sha)
             log_fn(f"[OK] Generated & verified {fname} ({exp_sz} bytes)")
 

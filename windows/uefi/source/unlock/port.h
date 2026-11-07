@@ -7,6 +7,10 @@
 #include <stddef.h>
 #include "local_profile.h"
 
+#ifndef GU_APP_VERSION
+#define GU_APP_VERSION "1.2.6"
+#endif
+
 #ifndef GU_BOARD_ID
 #define GU_BOARD_ID 0x278210deU
 #endif
@@ -152,7 +156,8 @@ static inline GU_COLD_STATE GuClassifyColdState(UINT32 Plm, UINT32 Ss0, UINT32 S
    * AD102/AD104/GA102 SS1 reads as 0x7 or 0x2. Accept any un-overridden cold
    * SS1 (0..7) as long as FEAT_OVR_PLM has the closed cold L3-only permission
    * byte (0x8f). */
-  if (Plm != GU_EXPECTED_COLD_PLM && (Plm & 0xffU) != (GU_EXPECTED_COLD_PLM & 0xffU)) {
+  if (Plm != GU_EXPECTED_COLD_PLM && (Plm & 0xffU) != (GU_EXPECTED_COLD_PLM & 0xffU) &&
+      (Plm & 0xffU) != 0xefU) {
     return GU_COLD_UNKNOWN_PROFILE_STATE;
   }
   return GU_COLD_OK;

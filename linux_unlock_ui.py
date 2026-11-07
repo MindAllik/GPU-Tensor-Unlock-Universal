@@ -768,7 +768,7 @@ class LinuxUnlockApp(tk.Tk):
 
                     if info.get("gpu_detected"):
                         self.log(
-                            f"[OK] Detected: {info['gpu_name']} | Die={info['die_name']} ({info['support_tier']}) | "
+                            f"[OK] [v{core_detector.APP_VERSION}] Detected: {info['gpu_name']} | Die={info['die_name']} ({info['support_tier']}) | "
                             f"BDF={info['pci_bdf']} | PCI={info['board_id_hex']} | Subsys={info['subsystem_id_hex']} | "
                             f"Driver={info.get('bound_driver')} | Sources={', '.join(info.get('verification_sources', []))}"
                         )
