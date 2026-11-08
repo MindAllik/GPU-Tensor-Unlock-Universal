@@ -117,6 +117,10 @@ static UINTN GuCountTargetGopChildren(VOID) {
   return matched;
 }
 static VOID ConnectTargetGopChildrenNonRecursive(VOID) {
+  for(UINTN probe=0;probe<3;probe++) {
+    if(GuCountTargetGopChildren()>0)break;
+    GuStall(50000);
+  }
   EFI_HANDLE *handles=NULL;UINTN count=0;
   if(EFI_ERROR(Gu.bs->LocateHandleBuffer(ByProtocol,&GopGuid,NULL,&count,&handles)) || !handles)return;
   for(UINTN i=0;i<count;i++) {
@@ -128,9 +132,9 @@ static VOID ConnectTargetGopChildrenNonRecursive(VOID) {
            !g->Mode->FrameBufferBase && !g->Mode->FrameBufferSize && g->SetMode) {
           g->SetMode(g,0);
         }
-        /* Child-level ConnectController never touches PCI-level drivers on Gu.handle
-           (so BiosVideoDxe cannot be selected), while connecting GraphicsConsole + ConSplitter. */
-        Gu.bs->ConnectController(handles[i],NULL,NULL,TRUE);
+        /* Child-level non-recursive ConnectController (csm-compat.en.md §2):
+           never touches PCI-level drivers on Gu.handle so BiosVideoDxe cannot be selected. */
+        Gu.bs->ConnectController(handles[i],NULL,NULL,FALSE);
       }
     }
   }
@@ -239,10 +243,16 @@ static EFI_STATUS GuTryStartNativeGopFromBuffer(const UINT8 *rom,UINTN scan_byte
 }
 static EFI_STATUS GuStartNativeGopFromProm(VOID) {
   if(!Gu.bs->LocateProtocol || !Gu.bs->LoadImage || !Gu.bs->StartImage)return EFI_UNSUPPORTED;
-  /* 1. Try PciIo shadow OptionROM in UEFI RAM first (zero MMIO overhead when EFI slice is shadowed). */
-  if(Gu.pci && Gu.pci->RomImage && Gu.pci->RomSize>=1024) {
-    EFI_STATUS rom_res=GuTryStartNativeGopFromBuffer((const UINT8*)Gu.pci->RomImage,(UINTN)Gu.pci->RomSize,"PciIo.RomImage");
-    if(!EFI_ERROR(rom_res) && GuCountTargetGopChildren()>0)return EFI_SUCCESS;
+  /* 1. Try PciIo shadow OptionROM in UEFI RAM first (copied to pool buffer, matching nv-uefi-unlocker v2.1.10). */
+  if(Gu.pci && Gu.pci->RomImage && Gu.pci->RomSize>=1024 && Gu.pci->RomSize<=0x100000U) {
+    UINTN rom_sz=(UINTN)Gu.pci->RomSize;
+    UINT8 *rom_copy=GuAlloc(rom_sz);
+    if(rom_copy) {
+      memcpy(rom_copy,Gu.pci->RomImage,rom_sz);
+      EFI_STATUS rom_res=GuTryStartNativeGopFromBuffer(rom_copy,rom_sz,"PciIo.RomImage");
+      GuFree(rom_copy);
+      if(!EFI_ERROR(rom_res) && GuCountTargetGopChildren()>0)return EFI_SUCCESS;
+    }
   }
   /* 2. Fall back to BAR0 PROM window (covers CSM-on boards where PciIo.RomImage only shadows the 64 KB legacy BIOS). */
   if(!Gu.bar_base)return EFI_UNSUPPORTED;
@@ -256,23 +266,24 @@ static EFI_STATUS GuStartNativeGopFromProm(VOID) {
   return result;
 }
 static VOID GuRestoreVgaAndDecodeAttributes(BOOLEAN is_csm_bios_video,BOOLEAN has_explicit_binding) {
-  /* Restore pre-claim VGA forwarding (0x001C / 0x0006001C) + IO|MEM decoding (0x0300)
-     via PciIo Attributes so Windows pci.sys arbitration never fails with Code 12 (#35/#61/#107/#109). */
+  /* Restore pre-claim VGA forwarding (0x001C / 0x0006001C, e.g. 0x18) and IO|MEM decoding (0x0300)
+     in two separate PciIo->Attributes(Enable) calls (matching nv-uefi-unlocker v2.1.10 [16229ms]/[16247ms])
+     so Windows pci.sys arbitration claims 0xA0000-0xBFFFF and never fails with Code 12 (#35/#61/#107/#109). */
   if(Gu.bs->LocateProtocol && Gu.pci && Gu.pci->Attributes) {
     UINT64 sup_attr=0,cur_attr=0;
     if(!EFI_ERROR(Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationSupported,0,&sup_attr))) {
       UINT64 vga_mask=0x0006001cULL;
-      UINT64 want_vga=InitialPciAttributes&vga_mask;
+      UINT64 want_vga=(InitialPciAttributes&vga_mask)&sup_attr;
       if(!want_vga && (InitialTargetMatched>0 || is_csm_bios_video))want_vga=sup_attr&0x001cULL;
-      UINT64 want_decode=(((InitialBootCommand&1U) || (InitialConfig[1]&1U))?EFI_PCI_IO_ATTRIBUTE_IO:0)|EFI_PCI_IO_ATTRIBUTE_MEMORY;
-      UINT64 restore_mask=(want_vga|want_decode)&sup_attr;
-      if(restore_mask) {
-        EFI_STATUS vs=Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationEnable,restore_mask,NULL);
-        Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&cur_attr);
-        GuLog("VGA-RESTORE PciIo attributes: pre_claim=%#llx supported=%#llx restore=%#llx after=%#llx status=%#llx\n",
-          (unsigned long long)InitialPciAttributes,(unsigned long long)sup_attr,
-          (unsigned long long)restore_mask,(unsigned long long)cur_attr,(unsigned long long)vs);
-      }
+      UINT64 want_decode=((((InitialBootCommand&1U) || (InitialConfig[1]&1U))?EFI_PCI_IO_ATTRIBUTE_IO:0)|EFI_PCI_IO_ATTRIBUTE_MEMORY)&sup_attr;
+      EFI_STATUS vs1=EFI_SUCCESS,vs2=EFI_SUCCESS;
+      if(want_vga)vs1=Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationEnable,want_vga,NULL);
+      if(want_decode)vs2=Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationEnable,want_decode,NULL);
+      Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&cur_attr);
+      GuLog("VGA-RESTORE PciIo attributes: pre_claim=%#llx supported=%#llx vga=%#llx(%#llx) decode=%#llx(%#llx) after=%#llx\n",
+        (unsigned long long)InitialPciAttributes,(unsigned long long)sup_attr,
+        (unsigned long long)want_vga,(unsigned long long)vs1,
+        (unsigned long long)want_decode,(unsigned long long)vs2,(unsigned long long)cur_attr);
     }
   }
   if(InitialBootBme || has_explicit_binding || is_csm_bios_video) {
@@ -312,7 +323,6 @@ static EFI_STATUS RestoreDisplayForWindows(EFI_HANDLE Driver) {
     /* Real UEFI hardware path: restore IO|MEM|VGA decode before starting GOP, then run
        Native-GOP from OptionROM (with PCIR + NPDE stepping) and/or explicit GOP DriverBinding
        without calling generic PCI-level ConnectController(Gu.handle) which deadlocks in CSM BiosVideoDxe (#106/#107/#133). */
-    GuRestoreVgaAndDecodeAttributes(is_csm_bios_video,has_explicit_binding);
     if(is_csm_bios_video) {
       GuLog("CSM BiosVideoDxe owner detected (bytes=%llu version=%#x); bypassing Int10h and starting Native GOP from OptionROM\n",
         (unsigned long long)PendingOwner.size,PendingOwner.version);
