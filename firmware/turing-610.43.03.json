@@ -1,7 +1,11 @@
 {
   "release": "610.43.03",
   "chip": "tu102",
-  "supported_chips": ["tu102", "tu104", "tu106"],
+  "supported_chips": [
+    "tu102",
+    "tu104",
+    "tu106"
+  ],
   "note": "Experimental Turing (RTX 20-series / Quadro RTX / Titan RTX) firmware profile for 610.43.03. Uses Falcon v2 BooterLoadUcode_TU102 (16-byte AES-128 signature) and gsp_tu10x.bin.",
   "generated_sources": {
     "g_bindata_kgspGetBinArchiveBooterLoadUcode_TU102.c": {
@@ -10,7 +14,7 @@
     },
     "g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c": {
       "path": "src/nvidia/generated/g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c",
-      "sha256": "5185662535c9c55ffcb1a67698db5ca4fc852aa9ab1746072855bd1839c73742"
+      "sha256": "19628e0b148a5437b351ce9ecd4a04405ec4eb66521e1c318ca6ef5d1a0c2efe"
     }
   },
   "derived_assets": {

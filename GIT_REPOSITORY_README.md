@@ -10,7 +10,7 @@
 
 # GPU-Tensor-Unlock-Universal
 
-**Version: 1.2.6**
+**Version: 1.2.7**
 
 Consumer GeForce GPUs of the Ada Lovelace (`RTX 40xx`), Ampere (`RTX 30xx`), and Turing (`RTX 20xx`) generations carry the full physical Tensor Core execution units on silicon, but stock VBIOS firmware sets the `FMLA32` speed-select override (`0x0082381c` `SS0` / `0x00823820` `SS1` on Ada/Ampere, or `0x00409664` `SS0` / `0x0040966c` `SS1` on Turing) to half rate (`1`). Because of this fuse setting, matrix multiply-accumulate instructions that accumulate into 32-bit floating-point registers (`FP16 -> FP32`, `BF16 -> FP32`, `TF32 -> FP32`, and `FP8 E4M3 -> FP32`) run at half the issue rate of `FP16 -> FP16` or workstation RTX cards.
 
@@ -119,7 +119,7 @@ Source code in this repository is licensed under **GPL-2.0-only** (see `LICENSE`
 
 # GPU-Tensor-Unlock-Universal
 
-**Version: 1.2.6**
+**Version: 1.2.7**
 
 В пользовательских видеокартах GeForce поколений Ada Lovelace (`RTX 40xx`), Ampere (`RTX 30xx`) и Turing (`RTX 20xx`) физически распаяны полноценные тензорные блоки, однако в стоковом VBIOS регистр селектора скорости `FMLA32` (`0x0082381c` `SS0` / `0x00823820` `SS1` на Ada/Ampere или `0x00409664` `SS0` / `0x0040966c` `SS1` на Turing) выставлен в режим половинной частоты (`1`). Из-за этого матричные инструкции с накоплением результата в 32-битные регистры `FP32` (`FP16 -> FP32`, `BF16 -> FP32`, `TF32 -> FP32` и `FP8 E4M3 -> FP32`) исполняются вдвое медленнее, чем `FP16 -> FP16` или аналогичные инструкции на профессиональных картах RTX.
 

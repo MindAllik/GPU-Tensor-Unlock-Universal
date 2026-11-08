@@ -433,29 +433,12 @@ def build_all_linux_firmware_assets(
     for gsp_fname in ("gsp_ga10x.bin", "gsp_tu10x.bin"):
         gsp_dest = assets_dir / gsp_fname
         exp_gsp_sz, exp_gsp_sha = ALL_LINUX_FIRMWARE_SPECS[gsp_fname]
-        if gsp_dest.exists() and gsp_dest.stat().st_size == exp_gsp_sz and core_detector.sha256_file(gsp_dest) == exp_gsp_sha:
-            log_fn(f"[OK] Reused verified {gsp_fname} in assets cache")
-        else:
-            cached_gsp = cache_dir / gsp_fname
-            if not (cached_gsp.exists() and cached_gsp.stat().st_size == exp_gsp_sz and core_detector.sha256_file(cached_gsp) == exp_gsp_sha):
-                shared_gsp = core_detector._find_shared_cached_file(gsp_fname, exp_gsp_sha, log_fn)
-                if shared_gsp is not None:
-                    shutil.copy2(shared_gsp, cached_gsp)
-            if not (cached_gsp.exists() and cached_gsp.stat().st_size == exp_gsp_sz and core_detector.sha256_file(cached_gsp) == exp_gsp_sha):
-                pkg_path = core_detector.download_verified(
-                    core_detector.PACKAGE_URL,
-                    cache_dir / "nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst",
-                    core_detector.PACKAGE_SHA256,
-                    log_fn,
-                )
-                log_fn(f"[EXTRACT] Unpacking {gsp_fname} ({exp_gsp_sz / (1024 * 1024):.1f} MB)...")
-                core_detector.extract_gsp_from_zst(pkg_path, cached_gsp, member_name=gsp_fname)
-                if core_detector.sha256_file(cached_gsp) != exp_gsp_sha:
-                    cached_gsp.unlink(missing_ok=True)
-                    raise ValueError(f"Extracted {gsp_fname} SHA-256 mismatch!")
-                core_detector._save_to_shared_cache(cached_gsp, exp_gsp_sha)
-            core_detector._write_verified_file(gsp_dest, cached_gsp.read_bytes(), exp_gsp_sha)
-            log_fn(f"[OK] Staged & verified {gsp_fname} ({exp_gsp_sz:,} bytes)")
+        is_tu_gsp = (gsp_fname == "gsp_tu10x.bin")
+        cached_gsp, actual_sz, actual_sha = core_detector.ensure_cached_gsp_firmware(
+            gsp_fname, exp_gsp_sz, exp_gsp_sha, is_tu_gsp, log_fn
+        )
+        core_detector._write_verified_file(gsp_dest, cached_gsp.read_bytes(), actual_sha)
+        log_fn(f"[OK] Staged & verified {gsp_fname} ({actual_sz:,} bytes)")
 
     # 4. Stage NVIDIA-LICENSE (NVIDIA Driver License Agreement, SHA-256 c692fb14...) for Makefile install-firmware compatibility
     for cand_lic in (

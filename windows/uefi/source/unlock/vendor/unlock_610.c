@@ -1172,7 +1172,7 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 		goto out;
 	}
 	dev_info(&work->pdev->dev, "FWSEC result: scratch=%#x expected_hi16=0\n", scratch);
-	if (scratch >> 16) {
+	if ((scratch >> 16) && !(GU_ARCH_TURING && inaccessible(scratch))) {
 		ret = -EIO;
 		goto out;
 	}
@@ -1395,7 +1395,7 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
  if (read_bar(work,0x1fa824,&saved_lo) || inaccessible(saved_lo) ||
      read_bar(work,0x1fa828,&saved_hi) || inaccessible(saved_hi)) return GU_RESULT(-EIO);
  for(index=0;index<ARRAY_SIZE(plm_targets);index++) {
-  if(read_target_plm(work,plm_targets[index].addr,&plm,(GU_ARCH_ADA?(index!=1):(index==0||index==3))))return GU_RESULT(-ENODEV);
+  if(read_target_plm(work,plm_targets[index].addr,&plm,(GU_ARCH_ADA?(index!=1):(GU_ARCH_TURING?(index==3):(index==0||index==3)))))return GU_RESULT(-ENODEV);
   dev_info(&work->pdev->dev,"AD102 PLM initial: index=%u target=%s value=%#x expected=%#x\n",index,plm_targets[index].name,plm,plm_targets[index].value);
  }
  dev_info(&work->pdev->dev,"AD102 SINGLE FIRE: WPR_CFG->FBPA->WPR->FEAT inside one SEC2 execution; max_starts=1\n");
@@ -1421,7 +1421,7 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
     read_bar(work,SEC2_BASE+0x94,&debug))return GU_RESULT(-ENODEV);
  work->sec2_halt_verified=!inaccessible(cpuctl) && !!(cpuctl&0x10);
  for(index=0;index<ARRAY_SIZE(plm_targets);index++) {
-  if(read_target_plm(work,plm_targets[index].addr,&plm,(GU_ARCH_ADA?(index!=1):(index==0||index==3))))return GU_RESULT(-ENODEV);
+  if(read_target_plm(work,plm_targets[index].addr,&plm,(GU_ARCH_ADA?(index!=1):(GU_ARCH_TURING?(index==3):(index==0||index==3)))))return GU_RESULT(-ENODEV);
   dev_info(&work->pdev->dev,"AD102 PLM final: index=%u target=%s value=%#x expected=%#x matched=%u\n",index,plm_targets[index].name,plm,plm_targets[index].value,plm==plm_targets[index].value);
 #if !defined(GU_ARCH_ADA) || GU_ARCH_ADA
   if(plm!=plm_targets[index].value) { all=false; if(index!=1)required=false; }

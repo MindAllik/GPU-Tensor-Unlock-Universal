@@ -36,7 +36,7 @@ def get_app_version() -> str:
         m = re.search(r"\*\*Version:\s*([0-9]+\.[0-9]+\.[0-9]+)\*\*", readme.read_text(encoding="utf-8", errors="replace"))
         if m:
             return m.group(1)
-    return "1.2.6"
+    return "1.2.7"
 
 
 APP_VERSION: str = get_app_version()
@@ -267,7 +267,7 @@ SOURCE_C_FILES = {
         "https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/452cec62d827034798072827d3866d1881662b77/src/nvidia/generated/g_bindata_kgspGetBinArchiveBooterLoadUcode_TU102.c",
     ),
     "g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c": (
-        "5185662535c9c55ffcb1a67698db5ca4fc852aa9ab1746072855bd1839c73742",
+        "19628e0b148a5437b351ce9ecd4a04405ec4eb66521e1c318ca6ef5d1a0c2efe",
         "https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/452cec62d827034798072827d3866d1881662b77/src/nvidia/generated/g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c",
     ),
 }
@@ -2443,25 +2443,75 @@ def build_booter_bundle(source_text: str) -> bytes:
     return prefix + image + signatures
 
 
-def _find_shared_cached_file(filename: str, expected_sha256: str, log_fn: Callable[[str], None] | None = None) -> Path | None:
-    """Check persistent user cache folders (~/.cache/gpu-tensor-unlock and ~/.cache/gpu-unlock/inputs)
-    so unpacking a new ZIP never re-downloads 285 MB if already downloaded earlier on this PC."""
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
+
+NVIDIA_RUN_URLS = (
+    "https://download.nvidia.com/XFree86/Linux-x86_64/610.43.03/NVIDIA-Linux-x86_64-610.43.03.run",
+    "https://us.download.nvidia.com/XFree86/Linux-x86_64/610.43.03/NVIDIA-Linux-x86_64-610.43.03.run",
+)
+
+
+def _safe_unlink(path: Path) -> None:
+    """Remove a file safely on Windows where Defender (MsMpEng.exe) may briefly hold a scan lock."""
+    for _ in range(6):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            time.sleep(0.25)
+        except Exception:
+            return
+
+
+def _safe_replace(src: Path, dst: Path) -> None:
+    """Atomically replace dst with src, retrying brief Windows Defender file-scan locks (WinError 32)."""
+    last_err: Exception | None = None
+    for _ in range(8):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as exc:
+            last_err = exc
+            time.sleep(0.25)
+    if last_err is not None:
+        raise last_err
+
+
+def _cleanup_stale_part_files(directory: Path) -> None:
+    try:
+        if directory.is_dir():
+            for p in directory.glob("*.part"):
+                _safe_unlink(p)
+    except Exception:
+        pass
+
+
+def _find_shared_cached_file(filename: str, expected_sha256: str | None, log_fn: Callable[[str], None] | None = None) -> Path | None:
+    """Check persistent user cache folders (~/.cache/gpu-tensor-unlock, ~/.cache/gpu-unlock/inputs,
+    APP_ROOT, and ~/Downloads) so unpacking a new ZIP or manually downloading an archive reuses it."""
     for cand_dir in (
+        CACHE_DIR,
+        APP_ROOT,
         Path.home() / ".cache" / "gpu-tensor-unlock",
         Path.home() / ".cache" / "gpu-unlock" / "inputs",
+        Path.home() / "Downloads",
     ):
         cand = cand_dir / filename
         try:
-            if cand.is_file() and not _is_reparse_or_symlink(cand) and sha256_file(cand) == expected_sha256:
-                if log_fn:
-                    log_fn(f"[CACHE] Reusing verified {filename} from {cand_dir}")
-                return cand
+            if cand.is_file() and not _is_reparse_or_symlink(cand):
+                if expected_sha256 is None or sha256_file(cand) == expected_sha256:
+                    if log_fn and cand_dir != CACHE_DIR:
+                        log_fn(f"[CACHE] Reusing verified {filename} from {cand_dir}")
+                    return cand
         except Exception:
             continue
     return None
 
 
-def _save_to_shared_cache(src_file: Path, expected_sha256: str) -> None:
+def _save_to_shared_cache(src_file: Path, expected_sha256: str | None = None) -> None:
     """Mirror verified large firmware files into ~/.cache/gpu-tensor-unlock for future runs."""
     try:
         shared_dir = Path.home() / ".cache" / "gpu-tensor-unlock"
@@ -2469,91 +2519,183 @@ def _save_to_shared_cache(src_file: Path, expected_sha256: str) -> None:
         target = shared_dir / src_file.name
         if not target.exists() and not _is_reparse_or_symlink(shared_dir):
             shutil.copy2(src_file, target)
-            if sha256_file(target) != expected_sha256:
-                target.unlink(missing_ok=True)
+            if expected_sha256 and sha256_file(target) != expected_sha256:
+                _safe_unlink(target)
     except Exception:
         pass
 
 
-def download_verified(url: str, dest: Path, expected_sha256: str, log_fn: Callable[[str], None]) -> Path:
+def _curl_download_fallback(url: str, tmp: Path, log_fn: Callable[[str], None], label: str) -> bool:
+    """Use system curl (Windows System32/curl.exe with native Schannel TLS) when Python urllib
+    is blocked by Cloudflare JA3 fingerprinting or ISP DPI."""
+    curl_exe = (
+        r"C:\Windows\System32\curl.exe"
+        if sys.platform.startswith("win") and Path(r"C:\Windows\System32\curl.exe").exists()
+        else (shutil.which("curl.exe") or shutil.which("curl"))
+    )
+    if not curl_exe:
+        return False
+    _safe_unlink(tmp)
+    log_fn(f"[DOWNLOAD] Fetching {label} via native curl ({Path(curl_exe).name})...")
+    res = subprocess.run(
+        [
+            curl_exe,
+            "-fL",
+            "--retry",
+            "3",
+            "--retry-delay",
+            "2",
+            "--connect-timeout",
+            "30",
+            "-A",
+            BROWSER_USER_AGENT,
+            "-o",
+            str(tmp),
+            url,
+        ],
+        capture_output=True,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    return res.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 0
+
+
+def download_verified(url: str, dest: Path, expected_sha256: str | None, log_fn: Callable[[str], None]) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     if _is_reparse_or_symlink(dest.parent) or _is_reparse_or_symlink(dest):
         raise ValueError(f"Security violation: cache path {dest} is a symlink/reparse point")
-    if dest.exists() and sha256_file(dest) == expected_sha256:
+    _cleanup_stale_part_files(dest.parent)
+    if dest.exists() and dest.stat().st_size > 0 and (expected_sha256 is None or sha256_file(dest) == expected_sha256):
         log_fn(f"[OK] Cached: {dest.name}")
         return dest
 
     shared_hit = _find_shared_cached_file(dest.name, expected_sha256, log_fn)
     if shared_hit is not None:
+        if shared_hit.resolve() == dest.resolve():
+            return dest
         try:
             shutil.copy2(shared_hit, dest)
-            if sha256_file(dest) == expected_sha256:
+            if expected_sha256 is None or sha256_file(dest) == expected_sha256:
                 return dest
         except Exception:
             return shared_hit
 
-    req = urllib.request.Request(url, headers={"User-Agent": "GPU-Tensor-Unlock-Universal"})
-    fd, tmp_name = tempfile.mkstemp(prefix=dest.name + ".", suffix=".part", dir=str(dest.parent))
-    tmp = Path(tmp_name)
+    # Never call tempfile.mkstemp() before urlopen(), which leaked an open OS file descriptor (fd)
+    # on Windows whenever urlopen() raised an exception and caused WinError 32 on tmp.unlink()!
+    tmp = dest.parent / f"{dest.name}.{os.getpid()}.{int(time.monotonic() * 1000)}.part"
+    _safe_unlink(tmp)
+    req = urllib.request.Request(url, headers={"User-Agent": BROWSER_USER_AGENT})
     total_read = 0
+    urllib_err: Exception | None = None
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp, os.fdopen(fd, "wb") as out:
-            content_len = 0
-            try:
-                content_len = int(resp.headers.get("Content-Length") or 0)
-            except Exception:
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp:
                 content_len = 0
-            if content_len > 0:
-                log_fn(f"[DOWNLOAD] {dest.name} ({content_len / (1024 * 1024):.1f} MB) ...")
-            else:
-                log_fn(f"[DOWNLOAD] {dest.name} ...")
-            start_ts = time.monotonic()
-            last_log_ts = start_ts
-            while chunk := resp.read(256 * 1024):
-                total_read += len(chunk)
-                if total_read > MAX_DOWNLOAD_BYTES:
-                    raise ValueError(f"Download exceeded safety limit of {MAX_DOWNLOAD_BYTES} bytes")
-                out.write(chunk)
-                now = time.monotonic()
-                if (now - last_log_ts) >= 2.0:
-                    elapsed = max(0.001, now - start_ts)
-                    speed_mb = (total_read / (1024 * 1024)) / elapsed
-                    if content_len > 0:
-                        pct = (total_read * 100.0) / content_len
-                        log_fn(
-                            f"[DOWNLOAD] {dest.name}: {total_read / (1024 * 1024):.1f} / {content_len / (1024 * 1024):.1f} MB "
-                            f"({pct:.0f}%, {speed_mb:.1f} MB/s)"
-                        )
-                    else:
-                        log_fn(f"[DOWNLOAD] {dest.name}: {total_read / (1024 * 1024):.1f} MB ({speed_mb:.1f} MB/s)")
-                    last_log_ts = now
-            out.flush()
-            os.fsync(out.fileno())
+                try:
+                    content_len = int(resp.headers.get("Content-Length") or 0)
+                except Exception:
+                    content_len = 0
+                if content_len > 0:
+                    log_fn(f"[DOWNLOAD] {dest.name} ({content_len / (1024 * 1024):.1f} MB) ...")
+                else:
+                    log_fn(f"[DOWNLOAD] {dest.name} ...")
+                start_ts = time.monotonic()
+                last_log_ts = start_ts
+                with tmp.open("wb") as out:
+                    while chunk := resp.read(256 * 1024):
+                        total_read += len(chunk)
+                        if total_read > MAX_DOWNLOAD_BYTES:
+                            raise ValueError(f"Download exceeded safety limit of {MAX_DOWNLOAD_BYTES} bytes")
+                        out.write(chunk)
+                        now = time.monotonic()
+                        if (now - last_log_ts) >= 2.0:
+                            elapsed = max(0.001, now - start_ts)
+                            speed_mb = (total_read / (1024 * 1024)) / elapsed
+                            if content_len > 0:
+                                pct = (total_read * 100.0) / content_len
+                                log_fn(
+                                    f"[DOWNLOAD] {dest.name}: {total_read / (1024 * 1024):.1f} / {content_len / (1024 * 1024):.1f} MB "
+                                    f"({pct:.0f}%, {speed_mb:.1f} MB/s)"
+                                )
+                            else:
+                                log_fn(f"[DOWNLOAD] {dest.name}: {total_read / (1024 * 1024):.1f} MB ({speed_mb:.1f} MB/s)")
+                            last_log_ts = now
+                    out.flush()
+                    os.fsync(out.fileno())
+        except Exception as exc:
+            urllib_err = exc
+            _safe_unlink(tmp)
+            if not _curl_download_fallback(url, tmp, log_fn, dest.name):
+                raise urllib_err
+
         actual = sha256_file(tmp)
-        if actual != expected_sha256:
+        if expected_sha256 is not None and actual != expected_sha256:
             raise ValueError(f"SHA-256 mismatch for {dest.name}: expected {expected_sha256}, got {actual}")
-        os.replace(tmp, dest)
+        _safe_replace(tmp, dest)
         _save_to_shared_cache(dest, expected_sha256)
     except Exception:
-        tmp.unlink(missing_ok=True)
+        _safe_unlink(tmp)
         raise
-    log_fn(f"[OK] Verified SHA-256: {dest.name}")
+    log_fn(f"[OK] Verified: {dest.name}")
     return dest
 
 
 def extract_gsp_from_zst(pkg_path: Path, dest_gsp: Path, member_name: str = "gsp_ga10x.bin") -> None:
-    member = f"usr/lib/firmware/nvidia/610.43.03/{member_name}"
+    """Extract gsp_ga10x.bin or gsp_tu10x.bin from either a .pkg.tar.zst package or an
+    official NVIDIA-Linux-x86_64-610.43.03.run Makeself archive."""
+    member_suffixes = (
+        f"usr/lib/firmware/nvidia/610.43.03/{member_name}",
+        f"firmware/{member_name}",
+        f"./firmware/{member_name}",
+        f"/{member_name}",
+    )
+
+    def _matches_member(name: str) -> bool:
+        return name == member_name or any(name == s or name.endswith(s) for s in member_suffixes)
+
+    # Detect embedded zstd ((µ/ý) or xz (ý7zXZ\x00) offset for .run Makeself installers
+    zst_offset = 0
+    xz_offset = -1
+    with pkg_path.open("rb") as probe_fh:
+        head = probe_fh.read(512 * 1024)
+    if head.startswith(b"\x28\xb5\x2f\xfd"):
+        zst_offset = 0
+    else:
+        idx_zst = head.find(b"\x28\xb5\x2f\xfd")
+        idx_xz = head.find(b"\xfd7zXZ\x00")
+        if idx_zst > 0:
+            zst_offset = idx_zst
+        elif idx_xz >= 0:
+            xz_offset = idx_xz
+
+    if xz_offset >= 0:
+        import lzma
+        with pkg_path.open("rb") as fh:
+            fh.seek(xz_offset)
+            with lzma.open(fh) as xz_reader:
+                with tarfile.open(fileobj=xz_reader, mode="r|") as tf:
+                    for m in tf:
+                        if _matches_member(m.name):
+                            extracted_f = tf.extractfile(m)
+                            if extracted_f is None:
+                                raise ValueError(f"Member {m.name} has no file payload")
+                            dest_gsp.write_bytes(extracted_f.read())
+                            return
+        raise ValueError(f"{member_name} not found inside XZ archive {pkg_path.name}")
+
     try:
         import zstandard as zstd  # type: ignore
         with pkg_path.open("rb") as fh:
+            if zst_offset > 0:
+                fh.seek(zst_offset)
             dctx = zstd.ZstdDecompressor()
             with dctx.stream_reader(fh) as reader:
                 with tarfile.open(fileobj=reader, mode="r|") as tf:
                     for m in tf:
-                        if m.name == member:
+                        if _matches_member(m.name):
                             extracted_f = tf.extractfile(m)
                             if extracted_f is None:
-                                raise ValueError(f"Member {member} has no file payload")
+                                raise ValueError(f"Member {m.name} has no file payload")
                             data = extracted_f.read()
                             dest_gsp.write_bytes(data)
                             return
@@ -2561,7 +2703,8 @@ def extract_gsp_from_zst(pkg_path: Path, dest_gsp: Path, member_name: str = "gsp
         pass
 
     tar_exe = shutil.which("tar.exe") or shutil.which("tar")
-    if tar_exe:
+    if tar_exe and zst_offset == 0:
+        member = f"usr/lib/firmware/nvidia/610.43.03/{member_name}"
         with tempfile.TemporaryDirectory() as tmpd:
             res = subprocess.run(
                 [tar_exe, "-xf", str(pkg_path), "-C", tmpd, member],
@@ -2575,7 +2718,73 @@ def extract_gsp_from_zst(pkg_path: Path, dest_gsp: Path, member_name: str = "gsp
             shutil.move(str(extracted), str(dest_gsp))
             return
 
-    raise RuntimeError("Neither Python 'zstandard' nor Zstd-capable 'tar' is available to unpack .pkg.tar.zst")
+    raise RuntimeError("Neither Python 'zstandard' nor Zstd-capable 'tar' is available to unpack firmware archive")
+
+
+def ensure_cached_gsp_firmware(
+    gsp_fname: str,
+    exp_gsp_sz: int,
+    exp_gsp_sha: str,
+    is_turing: bool,
+    log_fn: Callable[[str], None],
+) -> tuple[Path, int, str]:
+    """Ensure gsp_ga10x.bin or gsp_tu10x.bin is present in CACHE_DIR, falling back from
+    archive.cachyos.org to official download.nvidia.com 610.43.03 .run installer if needed."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _cleanup_stale_part_files(CACHE_DIR)
+    cached_gsp = CACHE_DIR / gsp_fname
+
+    def _valid_gsp(p: Path) -> bool:
+        if not p.is_file() or _is_reparse_or_symlink(p):
+            return False
+        sz = p.stat().st_size
+        if sz < 16 * 1024 * 1024:
+            return False
+        if not is_turing:
+            return sz == exp_gsp_sz and sha256_file(p) == exp_gsp_sha
+        with p.open("rb") as fh:
+            return fh.read(4) == b"\x7fELF"
+
+    if not _valid_gsp(cached_gsp):
+        shared_gsp = _find_shared_cached_file(gsp_fname, None if is_turing else exp_gsp_sha, log_fn)
+        if shared_gsp is not None and _valid_gsp(shared_gsp):
+            if shared_gsp.resolve() != cached_gsp.resolve():
+                shutil.copy2(shared_gsp, cached_gsp)
+
+    if not _valid_gsp(cached_gsp):
+        pkg_path: Path | None = None
+        try:
+            pkg_path = download_verified(
+                PACKAGE_URL,
+                CACHE_DIR / "nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst",
+                PACKAGE_SHA256,
+                log_fn,
+            )
+        except Exception as cachy_exc:
+            log_fn(f"[INFO] Primary mirror unreachable ({cachy_exc}); falling back to official NVIDIA 610.43.03 installer...")
+            run_dest = CACHE_DIR / "NVIDIA-Linux-x86_64-610.43.03.run"
+            for nurl in NVIDIA_RUN_URLS:
+                try:
+                    pkg_path = download_verified(nurl, run_dest, None, log_fn)
+                    break
+                except Exception as n_exc:
+                    log_fn(f"[WARN] Mirror {nurl} failed: {n_exc}")
+            if pkg_path is None:
+                raise RuntimeError(
+                    f"Could not download {gsp_fname} from archive.cachyos.org or download.nvidia.com ({cachy_exc}). "
+                    f"You can also place nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst or {gsp_fname} into {CACHE_DIR}"
+                ) from cachy_exc
+
+        log_fn(f"[EXTRACT] Unpacking {gsp_fname} from {pkg_path.name}...")
+        extract_gsp_from_zst(pkg_path, cached_gsp, member_name=gsp_fname)
+        if not _valid_gsp(cached_gsp):
+            _safe_unlink(cached_gsp)
+            raise ValueError(f"Extracted {gsp_fname} failed ELF / SHA-256 verification!")
+        _save_to_shared_cache(cached_gsp, None if is_turing else exp_gsp_sha)
+
+    actual_sz = cached_gsp.stat().st_size
+    actual_sha = sha256_file(cached_gsp)
+    return cached_gsp, actual_sz, actual_sha
 
 
 def build_and_stage_usb(
@@ -2698,6 +2907,26 @@ def build_and_stage_usb(
         boot_bin = _array_bytes(c_texts[boot_c_name], "UCODE_IMAGE_PROD")
         desc_bin = _array_bytes(c_texts[boot_c_name], "UCODE_DESC_PROD")
 
+        gsp_fname = "gsp_tu10x.bin" if is_turing else "gsp_ga10x.bin"
+        exp_gsp_sz, exp_gsp_sha = specs[gsp_fname]
+        assets_dir = usb_root / "GPU-UNLOCK" / "ASSETS"
+        gsp_dest = assets_dir / gsp_fname
+        cached_gsp: Path | None = None
+        if (
+            gsp_dest.exists()
+            and not _is_reparse_or_symlink(gsp_dest)
+            and gsp_dest.stat().st_size >= 16 * 1024 * 1024
+            and (is_turing or (gsp_dest.stat().st_size == exp_gsp_sz and sha256_file(gsp_dest) == exp_gsp_sha))
+        ):
+            exp_gsp_sz = gsp_dest.stat().st_size
+            exp_gsp_sha = sha256_file(gsp_dest)
+            specs[gsp_fname] = (exp_gsp_sz, exp_gsp_sha)
+        else:
+            cached_gsp, exp_gsp_sz, exp_gsp_sha = ensure_cached_gsp_firmware(
+                gsp_fname, exp_gsp_sz, exp_gsp_sha, is_turing, log_fn
+            )
+            specs[gsp_fname] = (exp_gsp_sz, exp_gsp_sha)
+
         if is_turing:
             specs[f"booter_load_{chip_tag}.bin"] = (len(booter_bin), sha256_bytes(booter_bin))
             specs[f"gsp_boot_{chip_tag}.bin"] = (len(boot_bin), sha256_bytes(boot_bin))
@@ -2809,30 +3038,15 @@ def build_and_stage_usb(
             _write_verified_file(assets_dir / fname, blob, exp_sha)
             log_fn(f"[OK] Staged & verified {fname} ({exp_sz} bytes)")
 
-        gsp_fname = "gsp_tu10x.bin" if is_turing else "gsp_ga10x.bin"
-        gsp_dest = assets_dir / gsp_fname
         exp_gsp_sz, exp_gsp_sha = specs[gsp_fname]
         if gsp_dest.exists() and not _is_reparse_or_symlink(gsp_dest) and gsp_dest.stat().st_size == exp_gsp_sz and sha256_file(gsp_dest) == exp_gsp_sha:
-            log_fn(f"[OK] Reused existing verified {gsp_fname} on target")
+            log_fn(f"[OK] Reused existing verified {gsp_fname} on target ({exp_gsp_sz:,} bytes)")
         else:
-            cached_gsp = CACHE_DIR / gsp_fname
-            if not (cached_gsp.exists() and cached_gsp.stat().st_size == exp_gsp_sz and sha256_file(cached_gsp) == exp_gsp_sha):
-                shared_gsp = _find_shared_cached_file(gsp_fname, exp_gsp_sha, log_fn)
-                if shared_gsp is not None:
-                    shutil.copy2(shared_gsp, cached_gsp)
-            if not (cached_gsp.exists() and cached_gsp.stat().st_size == exp_gsp_sz and sha256_file(cached_gsp) == exp_gsp_sha):
-                pkg_path = download_verified(
-                    PACKAGE_URL,
-                    CACHE_DIR / "nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst",
-                    PACKAGE_SHA256,
-                    log_fn,
+            if cached_gsp is None:
+                cached_gsp, exp_gsp_sz, exp_gsp_sha = ensure_cached_gsp_firmware(
+                    gsp_fname, exp_gsp_sz, exp_gsp_sha, is_turing, log_fn
                 )
-                log_fn(f"[EXTRACT] Unpacking {gsp_fname} ({exp_gsp_sz / (1024 * 1024):.1f} MB)...")
-                extract_gsp_from_zst(pkg_path, cached_gsp, member_name=gsp_fname)
-                if sha256_file(cached_gsp) != exp_gsp_sha:
-                    cached_gsp.unlink(missing_ok=True)
-                    raise ValueError(f"Extracted {gsp_fname} SHA-256 mismatch!")
-                _save_to_shared_cache(cached_gsp, exp_gsp_sha)
+                specs[gsp_fname] = (exp_gsp_sz, exp_gsp_sha)
             log_fn(f"[USB] Writing {gsp_fname} ({exp_gsp_sz / (1024 * 1024):.1f} MB) to target drive (may take 10-30s on FAT32)...")
             _write_verified_file(gsp_dest, cached_gsp.read_bytes(), exp_gsp_sha)
             log_fn(f"[OK] Staged & verified {gsp_fname} ({exp_gsp_sz:,} bytes)")

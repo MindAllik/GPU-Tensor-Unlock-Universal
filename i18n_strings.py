@@ -6,7 +6,7 @@ from __future__ import annotations
 
 I18N: dict[str, dict[str, str]] = {
     "EN": {
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.6 // UNIVERSAL CONSOLE [WINDOWS 10 / 11]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.7 // UNIVERSAL CONSOLE [WINDOWS 10 / 11]",
         "subtitle": "Pre-Boot UEFI FMLA32 Speed-Select Unlocker for Ada Lovelace (RTX 40xx), Ampere (RTX 30xx) & Turing (RTX 20xx)",
         "issues_note": "If you encounter any issues, please describe them in the project's GitHub Issues — your feedback is very valuable to me!",
         "lang_label": "LANGUAGE:",
@@ -69,7 +69,7 @@ I18N: dict[str, dict[str, str]] = {
         "err_no_usb": "Please select a verified removable FAT32 USB drive (not internal disk C:\\).",
     },
     "RU": {
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.6 // УНИВЕРСАЛЬНАЯ КОНСОЛЬ [WINDOWS 10 / 11]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.7 // УНИВЕРСАЛЬНАЯ КОНСОЛЬ [WINDOWS 10 / 11]",
         "subtitle": "UEFI-разблокировщик селекторов FMLA32 для видеокарт Ada Lovelace (RTX 40xx), Ampere (RTX 30xx) и Turing (RTX 20xx)",
         "issues_note": "Если у вас возникли какие-то проблемы, пожалуйста, опишите их в Issues проекта на GitHub — это очень ценно для меня!",
         "lang_label": "ЯЗЫК / LANG:",
@@ -132,7 +132,7 @@ I18N: dict[str, dict[str, str]] = {
         "err_no_usb": "Выберите проверенную съёмную USB-флешку с файловой системой FAT32 (не системный диск C:\\).",
     },
     "ZH": {
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.6 // 通用控制台 [WINDOWS 10 / 11]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.7 // 通用控制台 [WINDOWS 10 / 11]",
         "subtitle": "适用于 Ada Lovelace (RTX 40系)、Ampere (RTX 30系) 与 Turing (RTX 20系) 的 UEFI 预启动 FMLA32 算力解锁工具",
         "issues_note": "如果您遇到任何问题，请在项目的 GitHub Issues 中描述并反馈，这对我非常宝贵！",
         "lang_label": "语言 / LANG:",
@@ -194,7 +194,7 @@ I18N: dict[str, dict[str, str]] = {
         "err_no_usb": "请选择经过验证的 FAT32 可移动 U 盘（禁止选择系统盘 C:\\）。",
     },
     "HI": {
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.6 // यूनिवर्सल कंसोल [WINDOWS 10 / 11]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.7 // यूनिवर्सल कंसोल [WINDOWS 10 / 11]",
         "subtitle": "Ada Lovelace (RTX 40xx), Ampere (RTX 30xx) और Turing (RTX 20xx) के लिए UEFI प्री-बूट FMLA32 अनलॉकर",
         "issues_note": "यदि आपको कोई समस्या आती है, तो कृपया प्रोजेक्ट के GitHub Issues में उसका वर्णन करें — यह मेरे लिए बहुत मूल्यवान है!",
         "lang_label": "भाषा / LANG:",
@@ -283,7 +283,7 @@ OS_MISMATCH_MESSAGES: dict[str, dict[str, str]] = {
 
 I18N_LINUX: dict[str, dict[str, str]] = {
     "EN": {
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.6 // LINUX KERNEL MODULE CONSOLE",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.7 // LINUX KERNEL MODULE CONSOLE",
         "subtitle": "Kernel Module (gpu_unlock.ko) & RM Selector Unlocker for Ada Lovelace (RTX 40xx), Ampere (RTX 30xx) & Turing (RTX 20xx)",
         "issues_note": "If you encounter any issues, please describe them in the project's GitHub Issues — your feedback is very valuable to me!",
         "lang_label": "LANGUAGE:",
@@ -336,7 +336,7 @@ I18N_LINUX: dict[str, dict[str, str]] = {
         "busy_close_msg": "A background task is currently running. Please wait for it to finish before closing the window.",
     },
     "RU": {
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.6 // КОНСОЛЬ LINUX [KERNEL MODULE GPU_UNLOCK.KO]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.7 // КОНСОЛЬ LINUX [KERNEL MODULE GPU_UNLOCK.KO]",
         "subtitle": "Ядерный разблокировщик селекторов FMLA32 (gpu_unlock.ko + RM ioctl) для видеокарт Ada Lovelace, Ampere и Turing",
         "issues_note": "Если у вас возникли какие-то проблемы, пожалуйста, опишите их в Issues проекта на GitHub — это очень ценно для меня!",
         "lang_label": "ЯЗЫК / LANG:",
@@ -389,7 +389,7 @@ I18N_LINUX: dict[str, dict[str, str]] = {
         "busy_close_msg": "Дождитесь завершения текущей фоновой операции перед закрытием окна.",
     },
     "ZH": {
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.6 // LINUX 内核模块控制台 [GPU_UNLOCK.KO]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.7 // LINUX 内核模块控制台 [GPU_UNLOCK.KO]",
         "subtitle": "适用于 Ada Lovelace、Ampere 与 Turing 的 Linux 内核模块 (gpu_unlock.ko) 与 RM 选择器解锁工具",
         "issues_note": "如果您遇到任何问题，请在项目的 GitHub Issues 中描述并反馈，这对我非常宝贵！",
         "lang_label": "语言 / LANG:",
@@ -442,7 +442,7 @@ I18N_LINUX: dict[str, dict[str, str]] = {
         "busy_close_msg": "后台任务正在运行，请等待完成后再关闭窗口。",
     },
     "HI": {
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.6 // LINUX कर्नेल मॉड्यूल कंसोल [GPU_UNLOCK.KO]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.2.7 // LINUX कर्नेल मॉड्यूल कंसोल [GPU_UNLOCK.KO]",
         "subtitle": "Ada Lovelace, Ampere और Turing के लिए कर्नेल मॉड्यूल (gpu_unlock.ko) और RM सेलेक्टर अनलॉकर",
         "issues_note": "यदि आपको कोई समस्या आती है, तो कृपया प्रोजेक्ट के GitHub Issues में उसका वर्णन करें — यह मेरे लिए बहुत मूल्यवान है!",
         "lang_label": "भाषा / LANG:",
