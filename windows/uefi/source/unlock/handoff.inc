@@ -98,6 +98,24 @@ static EFI_STATUS VerifySelectors(const char *phase) {
   return !Gu.fault && GuLogReady() && ss0==0x88888888 && ss1==8 && arch_ok
     ? EFI_SUCCESS : EFI_DEVICE_ERROR;
 }
+static UINT16 GuReadLe16(const UINT8 *p) {
+  return (UINT16)p[0]|((UINT16)p[1]<<8);
+}
+static UINT32 GuReadLe32(const UINT8 *p) {
+  return (UINT32)p[0]|((UINT32)p[1]<<8)|((UINT32)p[2]<<16)|((UINT32)p[3]<<24);
+}
+static UINTN GuCountTargetGopChildren(VOID) {
+  EFI_HANDLE *handles=NULL;UINTN count=0,matched=0;
+  if(EFI_ERROR(Gu.bs->LocateHandleBuffer(ByProtocol,&GopGuid,NULL,&count,&handles)) || !handles)return 0;
+  for(UINTN i=0;i<count;i++) {
+    EFI_DEVICE_PATH_PROTOCOL *path=NULL;EFI_HANDLE parent=NULL;
+    if(!EFI_ERROR(Gu.bs->HandleProtocol(handles[i],&PathGuid,(VOID**)&path)) && path) {
+      if(!EFI_ERROR(Gu.bs->LocateDevicePath(&PciGuid,&path,&parent)) && parent==Gu.handle)matched++;
+    }
+  }
+  GuFree(handles);
+  return matched;
+}
 static VOID ConnectTargetGopChildrenNonRecursive(VOID) {
   EFI_HANDLE *handles=NULL;UINTN count=0;
   if(EFI_ERROR(Gu.bs->LocateHandleBuffer(ByProtocol,&GopGuid,NULL,&count,&handles)) || !handles)return;
@@ -110,34 +128,51 @@ static VOID ConnectTargetGopChildrenNonRecursive(VOID) {
            !g->Mode->FrameBufferBase && !g->Mode->FrameBufferSize && g->SetMode) {
           g->SetMode(g,0);
         }
-        Gu.bs->ConnectController(handles[i],NULL,NULL,FALSE);
+        /* Child-level ConnectController never touches PCI-level drivers on Gu.handle
+           (so BiosVideoDxe cannot be selected), while connecting GraphicsConsole + ConSplitter. */
+        Gu.bs->ConnectController(handles[i],NULL,NULL,TRUE);
       }
     }
   }
   GuFree(handles);
 }
-static EFI_STATUS GuStartNativeGopFromProm(VOID) {
-  if(!Gu.bar_base || !Gu.bs->LocateProtocol || !Gu.bs->LoadImage || !Gu.bs->StartImage)return EFI_UNSUPPORTED;
-  UINTN scan_bytes=0x60000U;
-  UINT8 *rom=GuAlloc(scan_bytes);
-  if(!rom)return EFI_OUT_OF_RESOURCES;
-  GuCopyFromIo(rom,(VOID*)(UINTN)(Gu.bar_base+GU_PROM_BAR_OFFSET),scan_bytes);
-  if(Gu.fault){GuFree(rom);return EFI_DEVICE_ERROR;}
+static EFI_STATUS GuTryStartNativeGopFromBuffer(const UINT8 *rom,UINTN scan_bytes,const char *source_tag) {
+  if(!rom || scan_bytes<1024 || !Gu.bs->LocateProtocol || !Gu.bs->LoadImage || !Gu.bs->StartImage)return EFI_UNSUPPORTED;
   UINTN pos=0;EFI_STATUS result=EFI_NOT_FOUND;
-  while(pos+sizeof(EFI_PCI_EXPANSION_ROM_HEADER)<scan_bytes) {
-    UINT16 sig=(UINT16)rom[pos]|((UINT16)rom[pos+1]<<8);
-    if(sig!=0xaa55U)break;
-    UINT16 pcir_off=(UINT16)rom[pos+0x18]|((UINT16)rom[pos+0x19]<<8);
-    if(!pcir_off || pos+pcir_off+sizeof(PCI_DATA_STRUCTURE)>scan_bytes)break;
-    const PCI_DATA_STRUCTURE *pcir=(const PCI_DATA_STRUCTURE*)(rom+pos+pcir_off);
-    if(pcir->Signature!=PCI_DATA_STRUCTURE_SIGNATURE)break;
-    UINTN img_bytes=(UINTN)pcir->ImageLength*512U;
+  for(UINTN img_idx=0;img_idx<8 && pos+sizeof(EFI_PCI_EXPANSION_ROM_HEADER)<=scan_bytes;img_idx++) {
+    UINT16 sig=GuReadLe16(rom+pos);
+    if(sig!=0xaa55U && sig!=0x4e56U && sig!=0xbb77U)break;
+    UINTN pcir_off=GuReadLe16(rom+pos+0x18);
+    UINTN pcir_abs=pos+pcir_off;
+    if(!pcir_off || pcir_abs+sizeof(PCI_DATA_STRUCTURE)>scan_bytes)break;
+    UINT32 dsig=GuReadLe32(rom+pcir_abs);
+    if(dsig!=0x52494350U && dsig!=0x5344504eU && dsig!=0x53494752U)break;
+    UINTN img_bytes=(UINTN)GuReadLe16(rom+pcir_abs+0x10)*512U;
+    UINT8 code_type=rom[pcir_abs+0x14];
+    UINT8 last=rom[pcir_abs+0x15]&0x80U;
+    /* NVIDIA OptionROMs store the true sub-image length and continuation flag inside the
+       16-byte-aligned NPDE ("NPDE" = 0x4544504e) header following PCIR (see vbios_610.c).
+       Without NPDE stepping, Image 0 (CodeType=0x00) sees PCIR.Indicator=0x80 and stops
+       before reaching Image 1 (CodeType=0x03 UEFI GOP). */
+    UINTN npde_abs=(pcir_abs+GuReadLe16(rom+pcir_abs+0x0a)+15U)&~(UINTN)15U;
+    if(npde_abs+10U<=scan_bytes && GuReadLe32(rom+npde_abs)==0x4544504eU) {
+      UINT16 ext_rev=GuReadLe16(rom+npde_abs+4);
+      UINT16 ext_len=GuReadLe16(rom+npde_abs+6);
+      if((ext_rev==0x0100U || ext_rev==0x0101U) && ext_len>=10U && npde_abs+ext_len<=scan_bytes) {
+        UINTN sub=(UINTN)GuReadLe16(rom+npde_abs+8)*512U;
+        if(sub>0 && pos+sub<=scan_bytes) {
+          if(ext_len>10U)last=rom[npde_abs+10]&0x80U;
+          else if(sub<img_bytes)last=0;
+          img_bytes=sub;
+        }
+      }
+    }
     if(!img_bytes || pos+img_bytes>scan_bytes)break;
-    if(pcir->CodeType==0x03U) {
+    if(code_type==0x03U && sig==0xaa55U) {
       const EFI_PCI_EXPANSION_ROM_HEADER *ehdr=(const EFI_PCI_EXPANSION_ROM_HEADER*)(rom+pos);
       UINT16 hdr_off=ehdr->EfiImageHeaderOffset;
       if(ehdr->EfiSignature==EFI_PCI_EXPANSION_ROM_HEADER_EFISIGNATURE && hdr_off>0 && hdr_off<img_bytes) {
-        VOID *src=rom+pos+hdr_off;
+        VOID *src=(VOID*)(rom+pos+hdr_off);
         UINT32 src_size=(UINT32)(img_bytes-hdr_off);
         VOID *pe_buf=NULL,*scratch=NULL;UINT32 pe_size=0,scratch_size=0;BOOLEAN allocated_pe=FALSE;
         if(ehdr->CompressionType==1U) {
@@ -161,13 +196,13 @@ static EFI_STATUS GuStartNativeGopFromProm(VOID) {
         } else if(ehdr->CompressionType==0U) {
           pe_buf=src;pe_size=src_size;
         }
-        if(pe_buf && pe_size>64) {
+        if(pe_buf && pe_size>64 && ((const UINT8*)pe_buf)[0]=='M' && ((const UINT8*)pe_buf)[1]=='Z') {
           EFI_HANDLE gop_img=NULL;
           EFI_STATUS ls=Gu.bs->LoadImage(FALSE,Gu.image,NULL,pe_buf,pe_size,&gop_img);
-          GuLog("Native-GOP ROM LoadImage: offset=%#zx size=%u status=%#llx\n",pos,pe_size,(unsigned long long)ls);
+          GuLog("Native-GOP [%s] LoadImage: offset=%#zx size=%u status=%#llx\n",source_tag,pos,pe_size,(unsigned long long)ls);
           if(!EFI_ERROR(ls) && gop_img) {
             EFI_STATUS ss=Gu.bs->StartImage(gop_img,NULL,NULL);
-            GuLog("Native-GOP ROM StartImage: status=%#llx\n",(unsigned long long)ss);
+            GuLog("Native-GOP [%s] StartImage: status=%#llx\n",source_tag,(unsigned long long)ss);
             if(!EFI_ERROR(ss)) {
               EFI_DRIVER_BINDING_PROTOCOL *b=NULL;
               if(EFI_ERROR(Gu.bs->HandleProtocol(gop_img,&HandoffBindingGuid,(VOID**)&b)) || !b) {
@@ -184,7 +219,7 @@ static EFI_STATUS GuStartNativeGopFromProm(VOID) {
               if(b && b->Supported && b->Start) {
                 EFI_STATUS sup=b->Supported(b,Gu.handle,NULL);
                 EFI_STATUS st=EFI_ERROR(sup)?sup:b->Start(b,Gu.handle,NULL);
-                GuLog("Native-GOP ROM DriverBinding: Supported=%#llx Start=%#llx\n",(unsigned long long)sup,(unsigned long long)st);
+                GuLog("Native-GOP [%s] DriverBinding: Supported=%#llx Start=%#llx\n",source_tag,(unsigned long long)sup,(unsigned long long)st);
                 if(!EFI_ERROR(st)) {
                   ConnectTargetGopChildrenNonRecursive();
                   result=EFI_SUCCESS;
@@ -197,11 +232,68 @@ static EFI_STATUS GuStartNativeGopFromProm(VOID) {
       }
       break;
     }
-    if(pcir->Indicator&0x80U)break;
+    if(last)break;
     pos+=img_bytes;
   }
+  return result;
+}
+static EFI_STATUS GuStartNativeGopFromProm(VOID) {
+  if(!Gu.bs->LocateProtocol || !Gu.bs->LoadImage || !Gu.bs->StartImage)return EFI_UNSUPPORTED;
+  /* 1. Try PciIo shadow OptionROM in UEFI RAM first (zero MMIO overhead when EFI slice is shadowed). */
+  if(Gu.pci && Gu.pci->RomImage && Gu.pci->RomSize>=1024) {
+    EFI_STATUS rom_res=GuTryStartNativeGopFromBuffer((const UINT8*)Gu.pci->RomImage,(UINTN)Gu.pci->RomSize,"PciIo.RomImage");
+    if(!EFI_ERROR(rom_res) && GuCountTargetGopChildren()>0)return EFI_SUCCESS;
+  }
+  /* 2. Fall back to BAR0 PROM window (covers CSM-on boards where PciIo.RomImage only shadows the 64 KB legacy BIOS). */
+  if(!Gu.bar_base)return EFI_UNSUPPORTED;
+  UINTN scan_bytes=0x60000U;
+  UINT8 *rom=GuAlloc(scan_bytes);
+  if(!rom)return EFI_OUT_OF_RESOURCES;
+  GuCopyFromIo(rom,(VOID*)(UINTN)(Gu.bar_base+GU_PROM_BAR_OFFSET),scan_bytes);
+  if(Gu.fault){GuFree(rom);return EFI_DEVICE_ERROR;}
+  EFI_STATUS result=GuTryStartNativeGopFromBuffer(rom,scan_bytes,"BAR0.PROM");
   GuFree(rom);
   return result;
+}
+static VOID GuRestoreVgaAndDecodeAttributes(BOOLEAN is_csm_bios_video,BOOLEAN has_explicit_binding) {
+  /* Restore pre-claim VGA forwarding (0x001C / 0x0006001C) + IO|MEM decoding (0x0300)
+     via PciIo Attributes so Windows pci.sys arbitration never fails with Code 12 (#35/#61/#107/#109). */
+  if(Gu.bs->LocateProtocol && Gu.pci && Gu.pci->Attributes) {
+    UINT64 sup_attr=0,cur_attr=0;
+    if(!EFI_ERROR(Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationSupported,0,&sup_attr))) {
+      UINT64 vga_mask=0x0006001cULL;
+      UINT64 want_vga=InitialPciAttributes&vga_mask;
+      if(!want_vga && (InitialTargetMatched>0 || is_csm_bios_video))want_vga=sup_attr&0x001cULL;
+      UINT64 want_decode=(((InitialBootCommand&1U) || (InitialConfig[1]&1U))?EFI_PCI_IO_ATTRIBUTE_IO:0)|EFI_PCI_IO_ATTRIBUTE_MEMORY;
+      UINT64 restore_mask=(want_vga|want_decode)&sup_attr;
+      if(restore_mask) {
+        EFI_STATUS vs=Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationEnable,restore_mask,NULL);
+        Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&cur_attr);
+        GuLog("VGA-RESTORE PciIo attributes: pre_claim=%#llx supported=%#llx restore=%#llx after=%#llx status=%#llx\n",
+          (unsigned long long)InitialPciAttributes,(unsigned long long)sup_attr,
+          (unsigned long long)restore_mask,(unsigned long long)cur_attr,(unsigned long long)vs);
+      }
+    }
+  }
+  if(InitialBootBme || has_explicit_binding || is_csm_bios_video) {
+    /* Ensure BME is cleared (bit 2 = 0) and original IO|MEM decode (typically 0x0003) is active in PCI Command. */
+    UINT16 cur_cmd=0;
+    if(!EFI_ERROR(GuConfigRead(EfiPciIoWidthUint16,4,&cur_cmd))) {
+      if(cur_cmd&4U) {
+        GuClearMaster();
+        GuConfigRead(EfiPciIoWidthUint16,4,&cur_cmd);
+      }
+      UINT16 want_io_mem=(InitialBootCommand&3U)?(InitialBootCommand&3U):2U;
+      if((cur_cmd&want_io_mem)!=want_io_mem && Gu.pci && Gu.pci->Pci.Write) {
+        UINT16 fixed_cmd=(UINT16)((cur_cmd&~7U)|want_io_mem);
+        if(!EFI_ERROR(Gu.pci->Pci.Write(Gu.pci,EfiPciIoWidthUint16,4,1,&fixed_cmd))) {
+          InitialConfig[1]=(InitialConfig[1]&~7U)|want_io_mem;
+        }
+      } else if(!(cur_cmd&2U) && Gu.pci && Gu.pci->Attributes) {
+        Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationEnable,EFI_PCI_IO_ATTRIBUTE_MEMORY,NULL);
+      }
+    }
+  }
 }
 static EFI_STATUS RestoreDisplayForWindows(EFI_HANDLE Driver) {
   if(!WindowsImage || !Driver || !GuScreenDetached || !GuSafeToReturn() || !Gu.quiesced ||
@@ -217,21 +309,21 @@ static EFI_STATUS RestoreDisplayForWindows(EFI_HANDLE Driver) {
   BOOLEAN has_explicit_binding=(!EFI_ERROR(bs_lookup) && binding && binding->Supported && binding->Start);
   BOOLEAN is_csm_bios_video=(PendingOwner.size>0 && PendingOwner.size<=65536U) || (PendingOwner.version>0 && PendingOwner.version<=0x30U);
   if(has_explicit_binding || (InitialBootBme && is_csm_bios_video)) {
-    /* Real UEFI hardware path: never call generic PCI-level ConnectController(Gu.handle, ...),
-       which invokes resident CSM BiosVideoDxe (Int10h) and deadlocks after PCIe FLR (#106/#107/#133). */
-    EFI_STATUS bind_status=EFI_UNSUPPORTED;
-    if(has_explicit_binding && !is_csm_bios_video) {
-      EFI_STATUS sup=binding->Supported(binding,Gu.handle,NULL);
-      bind_status=EFI_ERROR(sup)?sup:binding->Start(binding,Gu.handle,NULL);
-      GuLog("Explicit GOP DriverBinding: Supported=%#llx Start=%#llx\n",(unsigned long long)sup,(unsigned long long)bind_status);
-      if(!EFI_ERROR(bind_status))ConnectTargetGopChildrenNonRecursive();
-    } else {
+    /* Real UEFI hardware path: restore IO|MEM|VGA decode before starting GOP, then run
+       Native-GOP from OptionROM (with PCIR + NPDE stepping) and/or explicit GOP DriverBinding
+       without calling generic PCI-level ConnectController(Gu.handle) which deadlocks in CSM BiosVideoDxe (#106/#107/#133). */
+    GuRestoreVgaAndDecodeAttributes(is_csm_bios_video,has_explicit_binding);
+    if(is_csm_bios_video) {
       GuLog("CSM BiosVideoDxe owner detected (bytes=%llu version=%#x); bypassing Int10h and starting Native GOP from OptionROM\n",
         (unsigned long long)PendingOwner.size,PendingOwner.version);
     }
-    if(EFI_ERROR(bind_status)) {
-      EFI_STATUS nat_status=GuStartNativeGopFromProm();
-      GuLog("Native-GOP ROM recovery status=%#llx\n",(unsigned long long)nat_status);
+    EFI_STATUS nat_status=GuStartNativeGopFromProm();
+    GuLog("Native-GOP ROM recovery status=%#llx target_children=%zu\n",(unsigned long long)nat_status,(size_t)GuCountTargetGopChildren());
+    if((EFI_ERROR(nat_status) || GuCountTargetGopChildren()==0) && has_explicit_binding && !is_csm_bios_video) {
+      EFI_STATUS sup=binding->Supported(binding,Gu.handle,NULL);
+      EFI_STATUS bind_status=EFI_ERROR(sup)?sup:binding->Start(binding,Gu.handle,NULL);
+      GuLog("Explicit GOP DriverBinding fallback: Supported=%#llx Start=%#llx\n",(unsigned long long)sup,(unsigned long long)bind_status);
+      if(!EFI_ERROR(bind_status))ConnectTargetGopChildrenNonRecursive();
     }
     GuCheckpointReport();
   } else {
@@ -241,16 +333,7 @@ static EFI_STATUS RestoreDisplayForWindows(EFI_HANDLE Driver) {
     if(EFI_ERROR(conn_status) && !InitialBootBme)return conn_status;
   }
   s=GuRefreshTargetPci();if(EFI_ERROR(s))return s;
-  if(InitialBootBme || has_explicit_binding || is_csm_bios_video) {
-    /* Ensure BME is cleared and MMIO decode is active after GOP driver Start(). */
-    UINT16 cur_cmd=0;
-    if(!EFI_ERROR(GuConfigRead(EfiPciIoWidthUint16,4,&cur_cmd))) {
-      if(cur_cmd&4U)GuClearMaster();
-      if(!(cur_cmd&2U) && Gu.pci && Gu.pci->Attributes) {
-        Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationEnable,EFI_PCI_IO_ATTRIBUTE_MEMORY,NULL);
-      }
-    }
-  }
+  GuRestoreVgaAndDecodeAttributes(is_csm_bios_video,has_explicit_binding);
   ExpectDetached=FALSE;
   BOOLEAN disp_ok=DisplayCheck();
   if(!disp_ok) {
@@ -259,7 +342,7 @@ static EFI_STATUS RestoreDisplayForWindows(EFI_HANDLE Driver) {
   }
   UINT16 command=0,expected_cmd=(UINT16)InitialConfig[1];UINT32 value=0;
   s=GuConfigRead(EfiPciIoWidthUint16,4,&command);
-  BOOLEAN cmd_ok=(InitialBootBme || has_explicit_binding || is_csm_bios_video)?((command&2U)!=0):(command==expected_cmd && !(command&4));
+  BOOLEAN cmd_ok=(InitialBootBme || has_explicit_binding || is_csm_bios_video)?((command&2U)!=0 && !(command&4U)):(command==expected_cmd && !(command&4U));
   if(EFI_ERROR(s)||!cmd_ok)return EFI_DEVICE_ERROR;
   for(UINT32 offset=0x10;offset<=0x24;offset+=4) {
     s=GuConfigRead(EfiPciIoWidthUint32,offset,&value);

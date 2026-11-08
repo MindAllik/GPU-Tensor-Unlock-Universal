@@ -19,6 +19,8 @@ static EFI_GUID PciGuid=EFI_PCI_IO_PROTOCOL_GUID,GopGuid=EFI_GRAPHICS_OUTPUT_PRO
 static EFI_SYSTEM_TABLE *Table;
 static UINT32 InitialConfig[64];
 static BOOLEAN InitialBootBme;
+static UINT16 InitialBootCommand;
+static UINT64 InitialPciAttributes;
 static const char *Stage;
 static BOOLEAN ExpectDetached;
 static GU_RELEASE_OWNER PendingOwner;
@@ -154,7 +156,15 @@ static EFI_STATUS ConfigCheck(BOOLEAN Save) {
     (unsigned)caps.pm,(unsigned)caps.pcie,(unsigned)caps.msi,(unsigned)caps.msix);
   if(!valid)return EFI_UNSUPPORTED;
   if(!same)return EFI_NOT_READY;
-  if(Save){memcpy(InitialConfig,config,sizeof(config));InitialBootBme=(config[1]&4U)!=0;}
+  if(Save){
+    memcpy(InitialConfig,config,sizeof(config));
+    InitialBootBme=(config[1]&4U)!=0;
+    InitialBootCommand=(UINT16)(config[1]&3U);
+    if(Gu.bs->LocateProtocol && Gu.pci && Gu.pci->Attributes) {
+      if(EFI_ERROR(Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationGet,0,&InitialPciAttributes)))InitialPciAttributes=0;
+      GuLog("pre-claim PciIo attributes: mask=%#llx boot_cmd=%#x\n",(unsigned long long)InitialPciAttributes,InitialBootCommand);
+    }
+  }
   Gu.pm_cap=caps.pm;Gu.pcie_cap=caps.pcie;Gu.pcie_version=caps.pcie_version;Gu.msi_cap=caps.msi;Gu.msix_cap=caps.msix;
   return EFI_SUCCESS;
 }
@@ -518,7 +528,7 @@ EFI_STATUS EFIAPI EfiMain(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
   (void)Image;(void)St;return EFI_UNSUPPORTED;
 #endif
   if(!St || !St->BootServices || !St->RuntimeServices)return EFI_INVALID_PARAMETER;
-  WindowsImage=NULL;WindowsVolume=NULL;WindowsDevicePath=NULL;GuScreenDetached=FALSE;ExpectDetached=FALSE;PromDigestLatched=FALSE;LatchedPromSpanBytes=0;InitialTargetMatched=0;LatchedChip=0;InitialBootBme=FALSE;
+  WindowsImage=NULL;WindowsVolume=NULL;WindowsDevicePath=NULL;GuScreenDetached=FALSE;ExpectDetached=FALSE;PromDigestLatched=FALSE;LatchedPromSpanBytes=0;InitialTargetMatched=0;LatchedChip=0;InitialBootBme=FALSE;InitialBootCommand=0;InitialPciAttributes=0;
   DisplaysLatched=FALSE;OtherCount=0;memset(OtherDisplays,0,sizeof(OtherDisplays));
   Table=St;GuInit(St->BootServices,NULL);Gu.image=Image;Gu.display_check=DisplayCheck;Gu.verify_prom_span=GuVerifyPreparedPromSpan;
   memset(&PendingOwner,0,sizeof(PendingOwner));
@@ -527,6 +537,11 @@ EFI_STATUS EFIAPI EfiMain(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
   UINT8 secure=0xff;UINTN bytes=1;
   Stage="secure-boot";
   status=St->RuntimeServices->GetVariable(L"SecureBoot",&GlobalGuid,NULL,&bytes,&secure);
+  if(status==EFI_NOT_FOUND || status==EFI_UNSUPPORTED) {
+    /* UEFI Spec 32.3: platforms without a SecureBoot variable (e.g. X99 / older AMI BIOSes)
+       do not implement Secure Boot (secure = 0). */
+    secure=0;bytes=1;status=EFI_SUCCESS;
+  }
   if(EFI_ERROR(status) || bytes!=1 || secure>1){status=EFI_SECURITY_VIOLATION;goto finish;}
   if(secure) {
     UINT8 setup=0xff;bytes=1;

@@ -36,7 +36,7 @@ def get_app_version() -> str:
         m = re.search(r"\*\*Version:\s*([0-9]+\.[0-9]+\.[0-9]+)\*\*", readme.read_text(encoding="utf-8", errors="replace"))
         if m:
             return m.group(1)
-    return "1.2.7"
+    return "1.2.8"
 
 
 APP_VERSION: str = get_app_version()
@@ -695,9 +695,10 @@ def _query_windows_pnp_gpus() -> list[dict[str, Any]]:
     ps_cmd = (
         "Get-PnpDevice -Class Display -PresentOnly | Where-Object { $_.InstanceId -match '^PCI\\\\VEN_10DE' } | "
         "ForEach-Object { "
-        "$bus = (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_BusNumber').Data; "
-        "$addr = (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_Address').Data; "
-        "[PSCustomObject]@{ Name=$_.FriendlyName; InstanceId=$_.InstanceId; Bus=$bus; Addr=$addr } "
+        "$bus = (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_BusNumber' -ErrorAction SilentlyContinue).Data; "
+        "$addr = (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_Address' -ErrorAction SilentlyContinue).Data; "
+        "$prob = (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_ProblemCode' -ErrorAction SilentlyContinue).Data; "
+        "[PSCustomObject]@{ Name=$_.FriendlyName; InstanceId=$_.InstanceId; Status=[string]$_.Status; ProblemCode=$prob; Bus=$bus; Addr=$addr } "
         "} | ConvertTo-Json -Compress"
     )
     try:
@@ -713,17 +714,22 @@ def _query_windows_pnp_gpus() -> list[dict[str, Any]]:
             if isinstance(parsed, dict):
                 parsed = [parsed]
             for item in parsed:
-                inst = str(item.get("InstanceId", "")).upper()
+                raw_inst = str(item.get("InstanceId", "")).strip()
+                inst = raw_inst.upper()
                 m = re.search(r"VEN_10DE&DEV_([0-9A-F]{4})&SUBSYS_([0-9A-F]{8})", inst)
                 if m and item.get("Bus") is not None:
                     dev16 = int(m.group(1), 16)
                     sub32 = int(m.group(2), 16)
                     bus_num = int(item.get("Bus"))
                     addr = int(item.get("Addr") or 0)
+                    prob_code = int(item.get("ProblemCode") or 0)
                     dev_num = (addr >> 16) & 0x1F
                     func_num = addr & 0x7
                     results.append({
                         "gpu_name": _enrich_generic_gpu_name(item.get("Name") or "NVIDIA GPU", dev16),
+                        "instance_id": raw_inst,
+                        "pnp_status": str(item.get("Status") or "OK"),
+                        "pnp_problem_code": prob_code,
                         "dev16": dev16,
                         "board_id_hex": f"0x{dev16:04x}10de",
                         "subsystem_id_hex": f"0x{sub32:08x}",
@@ -736,6 +742,60 @@ def _query_windows_pnp_gpus() -> list[dict[str, Any]]:
     except Exception:
         pass
     return results
+
+
+def _try_recover_windows_pnp_code12(pnp_gpus: list[dict[str, Any]]) -> bool:
+    """Attempt in-OS PnP self-recovery (csm-compat.en.md §3.2) when a GPU is stopped with
+    Windows Device Manager Code 12 (CM_PROB_NORMAL_CONFLICT = 12). Disabling and re-enabling
+    or restarting the PnP device re-runs Windows resource arbitration without dropping the UEFI unlock."""
+    if not sys.platform.startswith("win"):
+        return False
+    code12_insts = [
+        str(g.get("instance_id") or "").strip()
+        for g in pnp_gpus
+        if g.get("instance_id") and (g.get("pnp_problem_code") == 12 or str(g.get("pnp_status", "OK")).upper() not in ("OK", ""))
+    ]
+    if not code12_insts:
+        return False
+    recovered_any = False
+    pnputil_exe = r"C:\Windows\System32\pnputil.exe"
+    if not Path(pnputil_exe).exists():
+        pnputil_exe = shutil.which("pnputil") or "pnputil"
+    for inst_id in code12_insts:
+        try:
+            r1 = subprocess.run(
+                [pnputil_exe, "/restart-device", inst_id],
+                capture_output=True,
+                text=True,
+                timeout=12,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if r1.returncode == 0:
+                recovered_any = True
+                continue
+        except Exception:
+            pass
+        try:
+            safe_id = inst_id.replace("'", "''")
+            ps_restart = (
+                f"Disable-PnpDevice -InstanceId '{safe_id}' -Confirm:$false -ErrorAction Stop; "
+                f"Start-Sleep -Milliseconds 750; "
+                f"Enable-PnpDevice -InstanceId '{safe_id}' -Confirm:$false -ErrorAction Stop"
+            )
+            r2 = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_restart],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if r2.returncode == 0:
+                recovered_any = True
+        except Exception:
+            pass
+    if recovered_any:
+        time.sleep(2.0)
+    return recovered_any
 
 
 NOMINAL_VRAM_MIB: dict[int, int] = {
@@ -1226,7 +1286,17 @@ def detect_host_environment() -> dict[str, Any]:
                 except Exception:
                     pass
 
-    # Fallback 1: If ctypes NVML failed to load, try nvidia-smi CLI
+    # If NVML returned 0 GPUs because Windows PnP halted the card with Code 12 after CSM handoff,
+    # attempt in-OS PnP self-recovery (csm-compat.en.md §3.2: disable/enable clears Code 12 without losing unlock)
+    if not info["gpus"] and any(g.get("pnp_problem_code") == 12 for g in pnp_gpus):
+        info["code12_detected"] = True
+        if _try_recover_windows_pnp_code12(pnp_gpus):
+            pnp_gpus = _query_windows_pnp_gpus()
+            cuda_by_loc = _query_cuda_sm_info()
+            if not any(g.get("pnp_problem_code") == 12 for g in pnp_gpus):
+                info["code12_auto_recovered"] = True
+
+    # Fallback 1: If ctypes NVML failed to load (or GPU just recovered from Code 12), try nvidia-smi CLI
     if not info["gpus"]:
         smi_drv, smi_gpus = _query_nvidia_smi_gpus()
         if smi_drv != "N/A":
@@ -1278,7 +1348,10 @@ def detect_host_environment() -> dict[str, Any]:
             c_info = cuda_by_loc.get((pg.get("domain", 0), pg["bus"], pg["dev"]), {})
             sm_ver = c_info.get("sm_version", "")
             cls = classify_pci_device(pg["dev16"], pg["gpu_name"], sm_ver)
-            sources = ["Windows PCI.sys (PnP fallback — VRAM/UUID require NVML)"]
+            prob_code = int(pg.get("pnp_problem_code") or 0)
+            sources = [f"Windows PCI.sys (PnP fallback, Code={prob_code} — VRAM/UUID require NVML)"]
+            if prob_code == 12:
+                info["code12_detected"] = True
             if sm_ver:
                 sources.append(f"CUDA ({sm_ver})")
             bdf_str = f"{pg.get('domain', 0):04x}:{pg['bus']:02x}:{pg['dev']:02x}.{pg['func']}"
@@ -2640,9 +2713,136 @@ def download_verified(url: str, dest: Path, expected_sha256: str | None, log_fn:
     return dest
 
 
+ARCH_PACKAGE_URL = "https://archive.archlinux.org/packages/n/nvidia-utils/nvidia-utils-610.43.03-1-x86_64.pkg.tar.zst"
+
+
+def _validate_gsp_elf_sections(path: Path, is_turing: bool, is_ada: bool = False) -> bool:
+    """Verify that a GSP firmware file is a valid 64-bit ELF containing the required
+    .fwimage section (<= 128 MiB) and 4096-byte .fwsignature_{tu10x,ga10x,ad10x} section,
+    matching gpu_unlock_elf_section() in vendor/prep_610.c."""
+    try:
+        if not path.is_file() or _is_reparse_or_symlink(path):
+            return False
+        file_size = path.stat().st_size
+        if file_size < 12 * 1024 * 1024 or file_size > 160 * 1024 * 1024:
+            return False
+        with path.open("rb") as fh:
+            ehdr = fh.read(64)
+            if len(ehdr) != 64 or ehdr[:4] != b"\x7fELF":
+                return False
+            if ehdr[4] != 2 or ehdr[5] != 1 or ehdr[6] != 1:
+                return False
+            e_version = struct.unpack_from("<I", ehdr, 20)[0]
+            e_shoff = struct.unpack_from("<Q", ehdr, 40)[0]
+            e_ehsize, e_shentsize, e_shnum, e_shstrndx = struct.unpack_from("<HHHH", ehdr, 52)
+            if e_version != 1 or e_ehsize != 64 or e_shentsize != 64 or e_shnum == 0 or e_shnum > 512 or e_shstrndx >= e_shnum:
+                return False
+            if e_shoff > file_size or e_shnum * e_shentsize > file_size - e_shoff:
+                return False
+            fh.seek(e_shoff)
+            sh_table = fh.read(e_shnum * e_shentsize)
+            if len(sh_table) != e_shnum * e_shentsize:
+                return False
+            shstr_hdr = sh_table[e_shstrndx * 64 : (e_shstrndx + 1) * 64]
+            shstr_off, shstr_size = struct.unpack_from("<QQ", shstr_hdr, 24)
+            if shstr_off > file_size or shstr_size > file_size - shstr_off or shstr_size > 1024 * 1024:
+                return False
+            fh.seek(shstr_off)
+            shstr = fh.read(shstr_size)
+            sections: dict[str, tuple[int, int]] = {}
+            for i in range(e_shnum):
+                sh = sh_table[i * 64 : (i + 1) * 64]
+                name_off = struct.unpack_from("<I", sh, 0)[0]
+                s_off, s_size = struct.unpack_from("<QQ", sh, 24)
+                if name_off >= len(shstr):
+                    continue
+                end_idx = shstr.find(b"\x00", name_off)
+                if end_idx < 0:
+                    continue
+                sec_name = shstr[name_off:end_idx].decode("ascii", errors="ignore")
+                if sec_name:
+                    sections[sec_name] = (s_off, s_size)
+        if ".fwimage" not in sections:
+            return False
+        fw_off, fw_sz = sections[".fwimage"]
+        if fw_sz <= 0 or fw_sz > (128 << 20) or fw_off + fw_sz > file_size:
+            return False
+        req_sigs = (".fwsignature_tu10x",) if is_turing else ((".fwsignature_ad10x",) if is_ada else (".fwsignature_ga10x",))
+        for sig_sec in req_sigs:
+            if sig_sec not in sections:
+                return False
+            sig_off, sig_sz = sections[sig_sec]
+            if sig_sz != 4096 or sig_off + sig_sz > file_size:
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _find_local_driverstore_gsp(
+    gsp_fname: str,
+    is_turing: bool,
+    is_ada: bool = False,
+    log_fn: Callable[[str], None] | None = None,
+) -> Path | None:
+    """Discover gsp_ga10x.bin or gsp_tu10x.bin from the local Windows DriverStore or Linux
+    /lib/firmware/nvidia (upstream v2.1.11 'badge mode' — zero 430 MB download on hosts with
+    an installed NVIDIA driver 525+)."""
+    candidates: list[Path] = []
+    try:
+        if sys.platform.startswith("win"):
+            sys_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+            for repo_rel in (
+                Path("System32") / "DriverStore" / "FileRepository",
+                Path("System32") / "HostDriverStore" / "FileRepository",
+            ):
+                repo_dir = sys_root / repo_rel
+                if repo_dir.is_dir():
+                    for drv_dir in repo_dir.glob("nv*"):
+                        if not drv_dir.is_dir():
+                            continue
+                        cand = drv_dir / gsp_fname
+                        if cand.is_file():
+                            candidates.append(cand)
+        else:
+            for fw_root in (
+                Path("/usr/lib/firmware/nvidia"),
+                Path("/lib/firmware/nvidia"),
+                Path("/run/current-system/firmware/nvidia"),
+            ):
+                if fw_root.is_dir():
+                    for ver_dir in fw_root.iterdir():
+                        cand = ver_dir / gsp_fname
+                        if cand.is_file():
+                            candidates.append(cand)
+    except Exception:
+        pass
+
+    if not candidates:
+        return None
+
+    # Prefer exact 610.43.03 match first if present, then newest driver store by mtime
+    candidates.sort(
+        key=lambda p: (1 if "610.43.03" in str(p) else 0, p.stat().st_mtime if p.exists() else 0.0),
+        reverse=True,
+    )
+    for cand in candidates:
+        if _validate_gsp_elf_sections(cand, is_turing=is_turing, is_ada=is_ada):
+            if log_fn:
+                log_fn(
+                    f"[OK] Found verified local driver GSP firmware (badge mode, 0 MB download): "
+                    f"{cand} ({cand.stat().st_size:,} bytes)"
+                )
+            return cand
+    return None
+
+
 def extract_gsp_from_zst(pkg_path: Path, dest_gsp: Path, member_name: str = "gsp_ga10x.bin") -> None:
     """Extract gsp_ga10x.bin or gsp_tu10x.bin from either a .pkg.tar.zst package or an
-    official NVIDIA-Linux-x86_64-610.43.03.run Makeself archive."""
+    official NVIDIA-Linux-x86_64-610.43.03.run Makeself archive.
+    Handles Makeself 'skip=<N>' line headers and embedded zstd decoder binaries (which contain
+    false-positive 0xFD2FB528 magic constants in their machine code) by probing all candidate
+    offsets with max_window_size=2**31."""
     member_suffixes = (
         f"usr/lib/firmware/nvidia/610.43.03/{member_name}",
         f"firmware/{member_name}",
@@ -2653,57 +2853,135 @@ def extract_gsp_from_zst(pkg_path: Path, dest_gsp: Path, member_name: str = "gsp
     def _matches_member(name: str) -> bool:
         return name == member_name or any(name == s or name.endswith(s) for s in member_suffixes)
 
-    # Detect embedded zstd ((µ/ý) or xz (ý7zXZ\x00) offset for .run Makeself installers
-    zst_offset = 0
-    xz_offset = -1
     with pkg_path.open("rb") as probe_fh:
-        head = probe_fh.read(512 * 1024)
+        head = probe_fh.read(2 * 1024 * 1024)
+
+    candidates: list[tuple[str, int]] = []
+    seen_offsets: set[tuple[str, int]] = set()
+
+    def _add_cand(kind: str, off: int) -> None:
+        if off >= 0 and (kind, off) not in seen_offsets:
+            seen_offsets.add((kind, off))
+            candidates.append((kind, off))
+
     if head.startswith(b"\x28\xb5\x2f\xfd"):
-        zst_offset = 0
-    else:
-        idx_zst = head.find(b"\x28\xb5\x2f\xfd")
-        idx_xz = head.find(b"\xfd7zXZ\x00")
-        if idx_zst > 0:
-            zst_offset = idx_zst
-        elif idx_xz >= 0:
-            xz_offset = idx_xz
+        _add_cand("zst", 0)
+    elif head.startswith(b"\xfd7zXZ\x00"):
+        _add_cand("xz", 0)
+    elif head.startswith(b"\x1f\x8b"):
+        _add_cand("gz", 0)
 
-    if xz_offset >= 0:
-        import lzma
-        with pkg_path.open("rb") as fh:
-            fh.seek(xz_offset)
-            with lzma.open(fh) as xz_reader:
-                with tarfile.open(fileobj=xz_reader, mode="r|") as tf:
-                    for m in tf:
-                        if _matches_member(m.name):
-                            extracted_f = tf.extractfile(m)
-                            if extracted_f is None:
-                                raise ValueError(f"Member {m.name} has no file payload")
-                            dest_gsp.write_bytes(extracted_f.read())
-                            return
-        raise ValueError(f"{member_name} not found inside XZ archive {pkg_path.name}")
+    # 1. Exact Makeself 'skip=<N>' line-count offset (NVIDIA .run installers)
+    m_skip = re.search(rb"^skip=(\d+)\b", head[:131072], re.M)
+    if m_skip:
+        skip_lines = int(m_skip.group(1))
+        pos_nl = 0
+        lines_seen = 0
+        while lines_seen < skip_lines and pos_nl < len(head):
+            nxt = head.find(b"\n", pos_nl)
+            if nxt < 0:
+                break
+            pos_nl = nxt + 1
+            lines_seen += 1
+        if lines_seen == skip_lines and pos_nl < len(head):
+            magic = head[pos_nl : pos_nl + 6]
+            if magic.startswith(b"\x28\xb5\x2f\xfd"):
+                _add_cand("zst", pos_nl)
+            elif magic.startswith(b"\xfd7zXZ\x00"):
+                _add_cand("xz", pos_nl)
+            elif magic.startswith(b"\x1f\x8b"):
+                _add_cand("gz", pos_nl)
 
-    try:
-        import zstandard as zstd  # type: ignore
-        with pkg_path.open("rb") as fh:
-            if zst_offset > 0:
-                fh.seek(zst_offset)
-            dctx = zstd.ZstdDecompressor()
-            with dctx.stream_reader(fh) as reader:
-                with tarfile.open(fileobj=reader, mode="r|") as tf:
-                    for m in tf:
-                        if _matches_member(m.name):
-                            extracted_f = tf.extractfile(m)
-                            if extracted_f is None:
-                                raise ValueError(f"Member {m.name} has no file payload")
-                            data = extracted_f.read()
-                            dest_gsp.write_bytes(data)
-                            return
-    except ImportError:
-        pass
+    # 2. Scan all Zstd (\x28\xb5\x2f\xfd) and XZ (\xfd7zXZ\x00) occurrences in the first 2 MiB.
+    # Prioritize Zstd frames whose Frame_Header_Descriptor byte has Dictionary_ID_Flag==0 & Reserved_bit==0.
+    zst_primary: list[int] = []
+    zst_secondary: list[int] = []
+    search_pos = 0
+    while True:
+        idx = head.find(b"\x28\xb5\x2f\xfd", search_pos)
+        if idx < 0:
+            break
+        if idx + 4 < len(head) and (head[idx + 4] & 0x0B) == 0:
+            zst_primary.append(idx)
+        else:
+            zst_secondary.append(idx)
+        search_pos = idx + 4
+
+    for off in zst_primary + zst_secondary:
+        _add_cand("zst", off)
+
+    search_pos = 0
+    while True:
+        idx = head.find(b"\xfd7zXZ\x00", search_pos)
+        if idx < 0:
+            break
+        _add_cand("xz", idx)
+        search_pos = idx + 6
+
+    last_err: Exception | None = None
+    for kind, off in candidates:
+        if kind == "xz":
+            try:
+                import lzma
+                with pkg_path.open("rb") as fh:
+                    fh.seek(off)
+                    with lzma.open(fh) as xz_reader:
+                        with tarfile.open(fileobj=xz_reader, mode="r|") as tf:
+                            for m in tf:
+                                if _matches_member(m.name):
+                                    extracted_f = tf.extractfile(m)
+                                    if extracted_f is None:
+                                        raise ValueError(f"Member {m.name} has no file payload")
+                                    dest_gsp.write_bytes(extracted_f.read())
+                                    return
+            except Exception as exc:
+                last_err = exc
+                continue
+        elif kind == "gz":
+            try:
+                import gzip
+                with pkg_path.open("rb") as fh:
+                    fh.seek(off)
+                    with gzip.GzipFile(fileobj=fh, mode="rb") as gz_reader:
+                        with tarfile.open(fileobj=gz_reader, mode="r|") as tf:
+                            for m in tf:
+                                if _matches_member(m.name):
+                                    extracted_f = tf.extractfile(m)
+                                    if extracted_f is None:
+                                        raise ValueError(f"Member {m.name} has no file payload")
+                                    dest_gsp.write_bytes(extracted_f.read())
+                                    return
+            except Exception as exc:
+                last_err = exc
+                continue
+        elif kind == "zst":
+            try:
+                import zstandard as zstd  # type: ignore
+                with pkg_path.open("rb") as fh:
+                    if off > 0:
+                        fh.seek(off)
+                    try:
+                        dctx = zstd.ZstdDecompressor(max_window_size=2**31)
+                    except TypeError:
+                        dctx = zstd.ZstdDecompressor()
+                    with dctx.stream_reader(fh) as reader:
+                        with tarfile.open(fileobj=reader, mode="r|") as tf:
+                            for m in tf:
+                                if _matches_member(m.name):
+                                    extracted_f = tf.extractfile(m)
+                                    if extracted_f is None:
+                                        raise ValueError(f"Member {m.name} has no file payload")
+                                    data = extracted_f.read()
+                                    dest_gsp.write_bytes(data)
+                                    return
+            except ImportError:
+                break
+            except Exception as exc:
+                last_err = exc
+                continue
 
     tar_exe = shutil.which("tar.exe") or shutil.which("tar")
-    if tar_exe and zst_offset == 0:
+    if tar_exe and any(k == "zst" and o == 0 for k, o in candidates):
         member = f"usr/lib/firmware/nvidia/610.43.03/{member_name}"
         with tempfile.TemporaryDirectory() as tmpd:
             res = subprocess.run(
@@ -2718,6 +2996,8 @@ def extract_gsp_from_zst(pkg_path: Path, dest_gsp: Path, member_name: str = "gsp
             shutil.move(str(extracted), str(dest_gsp))
             return
 
+    if last_err is not None:
+        raise RuntimeError(f"Failed to unpack {member_name} from {pkg_path.name}: {last_err}") from last_err
     raise RuntimeError("Neither Python 'zstandard' nor Zstd-capable 'tar' is available to unpack firmware archive")
 
 
@@ -2727,9 +3007,14 @@ def ensure_cached_gsp_firmware(
     exp_gsp_sha: str,
     is_turing: bool,
     log_fn: Callable[[str], None],
+    is_ada: bool = False,
 ) -> tuple[Path, int, str]:
-    """Ensure gsp_ga10x.bin or gsp_tu10x.bin is present in CACHE_DIR, falling back from
-    archive.cachyos.org to official download.nvidia.com 610.43.03 .run installer if needed."""
+    """Ensure gsp_ga10x.bin or gsp_tu10x.bin is present in CACHE_DIR.
+    Resolution order (upstream v2.1.11):
+      1. Existing verified gsp_*.bin in CACHE_DIR or shared cache (~/.cache/gpu-tensor-unlock).
+      2. Already-cached archive (NVIDIA-Linux-x86_64-610.43.03.run or nvidia-utils-*.pkg.tar.zst) in CACHE_DIR.
+      3. Local Windows DriverStore (C:\Windows\System32\DriverStore\FileRepository\nv*) or Linux /lib/firmware/nvidia ('badge mode').
+      4. Network download fallback: NVIDIA official .run CDN -> Arch Linux Archive -> CachyOS Archive."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     _cleanup_stale_part_files(CACHE_DIR)
     cached_gsp = CACHE_DIR / gsp_fname
@@ -2738,49 +3023,74 @@ def ensure_cached_gsp_firmware(
         if not p.is_file() or _is_reparse_or_symlink(p):
             return False
         sz = p.stat().st_size
-        if sz < 16 * 1024 * 1024:
-            return False
-        if not is_turing:
-            return sz == exp_gsp_sz and sha256_file(p) == exp_gsp_sha
-        with p.open("rb") as fh:
-            return fh.read(4) == b"\x7fELF"
+        if sz == exp_gsp_sz and sha256_file(p) == exp_gsp_sha:
+            return True
+        return _validate_gsp_elf_sections(p, is_turing=is_turing, is_ada=is_ada)
 
+    # 1. Check CACHE_DIR and shared cache for an already-extracted gsp_*.bin
     if not _valid_gsp(cached_gsp):
-        shared_gsp = _find_shared_cached_file(gsp_fname, None if is_turing else exp_gsp_sha, log_fn)
+        shared_gsp = _find_shared_cached_file(gsp_fname, None, log_fn)
         if shared_gsp is not None and _valid_gsp(shared_gsp):
             if shared_gsp.resolve() != cached_gsp.resolve():
                 shutil.copy2(shared_gsp, cached_gsp)
 
+    # 2. Check if an archive (.run or .pkg.tar.zst) is ALREADY downloaded in CACHE_DIR / shared cache
+    if not _valid_gsp(cached_gsp):
+        for arch_name, arch_sha in (
+            ("nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst", PACKAGE_SHA256),
+            ("nvidia-utils-610.43.03-1-x86_64.pkg.tar.zst", None),
+            ("NVIDIA-Linux-x86_64-610.43.03.run", None),
+        ):
+            existing_arch = _find_shared_cached_file(arch_name, arch_sha, log_fn)
+            if existing_arch is not None and existing_arch.stat().st_size > 32 * 1024 * 1024:
+                try:
+                    log_fn(f"[EXTRACT] Unpacking {gsp_fname} from cached {existing_arch.name}...")
+                    extract_gsp_from_zst(existing_arch, cached_gsp, member_name=gsp_fname)
+                    if _valid_gsp(cached_gsp):
+                        _save_to_shared_cache(cached_gsp, None)
+                        break
+                    _safe_unlink(cached_gsp)
+                except Exception as exc:
+                    log_fn(f"[WARN] Could not unpack cached {existing_arch.name}: {exc}")
+                    _safe_unlink(cached_gsp)
+
+    # 3. Local Windows DriverStore / Linux /lib/firmware/nvidia ('badge mode', 0 MB download)
+    if not _valid_gsp(cached_gsp):
+        local_drv_gsp = _find_local_driverstore_gsp(gsp_fname, is_turing=is_turing, is_ada=is_ada, log_fn=log_fn)
+        if local_drv_gsp is not None:
+            shutil.copy2(local_drv_gsp, cached_gsp)
+            if _valid_gsp(cached_gsp):
+                _save_to_shared_cache(cached_gsp, None)
+
+    # 4. Network download fallback (NVIDIA official CDN -> Arch Linux Archive -> CachyOS)
     if not _valid_gsp(cached_gsp):
         pkg_path: Path | None = None
-        try:
-            pkg_path = download_verified(
-                PACKAGE_URL,
-                CACHE_DIR / "nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst",
-                PACKAGE_SHA256,
-                log_fn,
-            )
-        except Exception as cachy_exc:
-            log_fn(f"[INFO] Primary mirror unreachable ({cachy_exc}); falling back to official NVIDIA 610.43.03 installer...")
-            run_dest = CACHE_DIR / "NVIDIA-Linux-x86_64-610.43.03.run"
-            for nurl in NVIDIA_RUN_URLS:
-                try:
-                    pkg_path = download_verified(nurl, run_dest, None, log_fn)
-                    break
-                except Exception as n_exc:
-                    log_fn(f"[WARN] Mirror {nurl} failed: {n_exc}")
-            if pkg_path is None:
-                raise RuntimeError(
-                    f"Could not download {gsp_fname} from archive.cachyos.org or download.nvidia.com ({cachy_exc}). "
-                    f"You can also place nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst or {gsp_fname} into {CACHE_DIR}"
-                ) from cachy_exc
+        last_dl_err: Exception | None = None
+        mirror_plan = [
+            (NVIDIA_RUN_URLS[0], CACHE_DIR / "NVIDIA-Linux-x86_64-610.43.03.run", None),
+            (NVIDIA_RUN_URLS[1], CACHE_DIR / "NVIDIA-Linux-x86_64-610.43.03.run", None),
+            (ARCH_PACKAGE_URL, CACHE_DIR / "nvidia-utils-610.43.03-1-x86_64.pkg.tar.zst", None),
+            (PACKAGE_URL, CACHE_DIR / "nvidia-utils-610.43.03-1-x86_64_v3.pkg.tar.zst", PACKAGE_SHA256),
+        ]
+        for m_url, m_dest, m_sha in mirror_plan:
+            try:
+                pkg_path = download_verified(m_url, m_dest, m_sha, log_fn)
+                break
+            except Exception as m_exc:
+                last_dl_err = m_exc
+                log_fn(f"[INFO] Mirror {m_url} unavailable ({m_exc}); trying next mirror...")
+        if pkg_path is None:
+            raise RuntimeError(
+                f"Could not obtain {gsp_fname} from local DriverStore or download mirrors ({last_dl_err}). "
+                f"You can also place {gsp_fname} into {CACHE_DIR}"
+            ) from last_dl_err
 
         log_fn(f"[EXTRACT] Unpacking {gsp_fname} from {pkg_path.name}...")
         extract_gsp_from_zst(pkg_path, cached_gsp, member_name=gsp_fname)
         if not _valid_gsp(cached_gsp):
             _safe_unlink(cached_gsp)
-            raise ValueError(f"Extracted {gsp_fname} failed ELF / SHA-256 verification!")
-        _save_to_shared_cache(cached_gsp, None if is_turing else exp_gsp_sha)
+            raise ValueError(f"Extracted {gsp_fname} failed ELF / section verification!")
+        _save_to_shared_cache(cached_gsp, None)
 
     actual_sz = cached_gsp.stat().st_size
     actual_sha = sha256_file(cached_gsp)
@@ -2915,15 +3225,17 @@ def build_and_stage_usb(
         if (
             gsp_dest.exists()
             and not _is_reparse_or_symlink(gsp_dest)
-            and gsp_dest.stat().st_size >= 16 * 1024 * 1024
-            and (is_turing or (gsp_dest.stat().st_size == exp_gsp_sz and sha256_file(gsp_dest) == exp_gsp_sha))
+            and (
+                (gsp_dest.stat().st_size == exp_gsp_sz and sha256_file(gsp_dest) == exp_gsp_sha)
+                or _validate_gsp_elf_sections(gsp_dest, is_turing=is_turing, is_ada=is_ada)
+            )
         ):
             exp_gsp_sz = gsp_dest.stat().st_size
             exp_gsp_sha = sha256_file(gsp_dest)
             specs[gsp_fname] = (exp_gsp_sz, exp_gsp_sha)
         else:
             cached_gsp, exp_gsp_sz, exp_gsp_sha = ensure_cached_gsp_firmware(
-                gsp_fname, exp_gsp_sz, exp_gsp_sha, is_turing, log_fn
+                gsp_fname, exp_gsp_sz, exp_gsp_sha, is_turing, log_fn, is_ada=is_ada
             )
             specs[gsp_fname] = (exp_gsp_sz, exp_gsp_sha)
 
@@ -2947,6 +3259,12 @@ def build_and_stage_usb(
                 f"#define GU_TU102_BOOT_HASH \"{rm_sha}\"\n"
                 f"#define GU_TU102_BOOT_DESC_SIZE {d_sz}U\n"
                 f"#define GU_TU102_BOOT_DESC_HASH \"{d_sha}\"\n"
+            )
+        else:
+            g_sz, g_sha = specs["gsp_ga10x.bin"]
+            tu_profile_defines = (
+                f"#define GU_GA102_GSP_SIZE {g_sz}U\n"
+                f"#define GU_GA102_GSP_HASH \"{g_sha}\"\n"
             )
 
         local_profile_text = f"""/* SPDX-License-Identifier: GPL-2.0-only */

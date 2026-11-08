@@ -539,5 +539,59 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
             self.assertEqual(prof["subsys_id"], 0x40591458)
 
 
+    def test_v128_makeself_run_unpacker_and_npde_vga_restore_and_x99_secureboot(self) -> None:
+        """Verify v1.2.8 fixes:
+        1) extract_gsp_from_zst unpacks .run Makeself archives even when an embedded zstd decoder stub
+           contains false-positive 0xFD2FB528 magic bytes before the true payload.
+        2) handoff.inc includes NPDE (0x4544504e) stepping and VGA-RESTORE (0x0006001cULL).
+        3) app.c treats EFI_NOT_FOUND / EFI_UNSUPPORTED on SecureBoot variable as secure=0 (X99 fix)."""
+        import io
+        import tarfile
+        import tempfile
+
+        handoff_txt = (core_detector.APP_ROOT / "windows" / "uefi" / "source" / "unlock" / "handoff.inc").read_text(encoding="utf-8")
+        self.assertIn("0x4544504eU", handoff_txt)
+        self.assertIn("VGA-RESTORE PciIo attributes", handoff_txt)
+        self.assertIn("0x0006001cULL", handoff_txt)
+
+        app_txt = (core_detector.APP_ROOT / "windows" / "uefi" / "source" / "unlock" / "app.c").read_text(encoding="utf-8")
+        self.assertIn("status==EFI_NOT_FOUND || status==EFI_UNSUPPORTED", app_txt)
+
+        # Build a synthetic tar archive in memory containing ./firmware/gsp_tu10x.bin
+        tar_buf = io.BytesIO()
+        payload_bytes = b"\x7fELF" + b"T" * 1024
+        with tarfile.open(fileobj=tar_buf, mode="w") as tf:
+            ti = tarfile.TarInfo(name="./firmware/gsp_tu10x.bin")
+            ti.size = len(payload_bytes)
+            tf.addfile(ti, io.BytesIO(payload_bytes))
+        raw_tar = tar_buf.getvalue()
+
+        try:
+            import zstandard as zstd
+            cctx = zstd.ZstdCompressor()
+            compressed = cctx.compress(raw_tar)
+            ext_magic_stub = b"\x81\xf8\x28\xb5\x2f\xfd\x75\x10"  # cmp eax, 0xfd2fb528; jne +16
+        except ImportError:
+            import lzma
+            compressed = lzma.compress(raw_tar)
+            ext_magic_stub = b"\x00\xfd7zXZ\x00\xff\xff"
+
+        # Construct a Makeself header with skip=5 and embedded false-positive magic inside line 4
+        makeself_hdr = (
+            b"#!/bin/sh\n"
+            b"# Makeself 1.6.0-nv9\n"
+            b"skip=5\n"
+            b"# embedded decoder stub: " + ext_magic_stub + b"\n"
+        )
+        run_bytes = makeself_hdr + compressed
+
+        with tempfile.TemporaryDirectory() as tmpd:
+            run_file = Path(tmpd) / "NVIDIA-Linux-x86_64-610.43.03.run"
+            out_gsp = Path(tmpd) / "gsp_tu10x.bin"
+            run_file.write_bytes(run_bytes)
+            core_detector.extract_gsp_from_zst(run_file, out_gsp, member_name="gsp_tu10x.bin")
+            self.assertEqual(out_gsp.read_bytes(), payload_bytes)
+
+
 if __name__ == "__main__":
     unittest.main()

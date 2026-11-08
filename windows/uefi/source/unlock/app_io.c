@@ -108,25 +108,20 @@ VOID GuCheckpointReport(VOID) {
   Run->Flush(Run);
   if(Parent)Parent->Flush(Parent);
   if(Root)Root->Flush(Root);
-  /* On real UEFI FAT32 (EnhancedFatDxe), EFI_FILE_PROTOCOL.Flush() may leave
-     DIR_FileSize uncommitted in the directory entry until Close() is called.
-     Close and immediately reopen REPORT.TXT at EOF when SetPosition is present. */
+  /* Only attempt Close+reopen if opening a second handle succeeds first (auto-degrade
+     for #198/#122 firmware where reopen after Close is refused by EnhancedFatDxe). */
   if(Report->SetPosition) {
-    EFI_FILE_PROTOCOL *reopened=NULL;
-    Report->Close(Report);
-    Report=NULL;
-    Run->Flush(Run);
-    if(Parent)Parent->Flush(Parent);
-    if(Root)Root->Flush(Root);
-    if(!EFI_ERROR(Run->Open(Run,&reopened,L"REPORT.TXT",EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE,0)) && reopened) {
-      if(!EFI_ERROR(reopened->SetPosition(reopened,0xffffffffffffffffULL))) {
-        Report=reopened;
+    EFI_FILE_PROTOCOL *probe=NULL;
+    if(!EFI_ERROR(Run->Open(Run,&probe,L"REPORT.TXT",EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE,0)) && probe) {
+      if(!EFI_ERROR(probe->SetPosition(probe,0xffffffffffffffffULL))) {
+        Report->Close(Report);
+        Report=probe;
+        Run->Flush(Run);
+        if(Parent)Parent->Flush(Parent);
+        if(Root)Root->Flush(Root);
       } else {
-        reopened->Close(reopened);
-        LogError();
+        probe->Close(probe);
       }
-    } else {
-      LogError();
     }
   }
 }
@@ -329,23 +324,27 @@ EFI_STATUS GuLoadAssets(VOID) {
   for(UINTN i=0;i<5;i++) {
     GuConsole(load_steps[i]);
     EFI_FILE_PROTOCOL *file=NULL;const ASSET_SPEC *spec=&Specs[i];
+    UINTN spec_size=spec->size;const char *spec_hash=spec->hash;
+#if defined(GU_GA102_GSP_SIZE) && defined(GU_GA102_GSP_HASH)
+    if(i==2 && !(GU_ARCH_TURING)){spec_size=GU_GA102_GSP_SIZE;spec_hash=GU_GA102_GSP_HASH;}
+#endif
     EFI_STATUS status=Parent->Open(Parent,&file,spec->file,EFI_FILE_MODE_READ,0);
     if(EFI_ERROR(status) || !file)return EFI_NOT_FOUND;
-    status=Metadata(file,FALSE,spec->size);
+    status=Metadata(file,FALSE,spec_size);
     UINT8 *data=NULL;
     if(!EFI_ERROR(status)) {
-      data=GuAlloc(spec->size);if(!data)status=EFI_OUT_OF_RESOURCES;
+      data=GuAlloc(spec_size);if(!data)status=EFI_OUT_OF_RESOURCES;
     }
-    for(UINTN done=0;!EFI_ERROR(status) && done<spec->size;) {
-      UINTN n=spec->size-done;if(n>1048576)n=1048576;UINTN want=n;
+    for(UINTN done=0;!EFI_ERROR(status) && done<spec_size;) {
+      UINTN n=spec_size-done;if(n>1048576)n=1048576;UINTN want=n;
       status=file->Read(file,&n,data+done);
       if(!EFI_ERROR(status) && n!=want)status=EFI_END_OF_FILE;done+=n;
     }
     EFI_STATUS closed=file->Close(file);if(!EFI_ERROR(status))status=closed;
-    if(!EFI_ERROR(status) && !GuHashMatches(data,spec->size,spec->hash))status=EFI_CRC_ERROR;
+    if(!EFI_ERROR(status) && !GuHashMatches(data,spec_size,spec_hash))status=EFI_CRC_ERROR;
     if(EFI_ERROR(status)){GuFree(data);return status;}
-    GuAssets[i].name=spec->name;GuAssets[i].firmware.data=data;GuAssets[i].firmware.size=spec->size;
-    GuLog("asset verified: %s bytes=%zu sha256=%s\n",spec->name,(size_t)spec->size,spec->hash);
+    GuAssets[i].name=spec->name;GuAssets[i].firmware.data=data;GuAssets[i].firmware.size=spec_size;
+    GuLog("asset verified: %s bytes=%zu sha256=%s\n",spec->name,(size_t)spec_size,spec_hash);
     if(!GuLogReady())return EFI_DEVICE_ERROR;
   }
   return EFI_SUCCESS;

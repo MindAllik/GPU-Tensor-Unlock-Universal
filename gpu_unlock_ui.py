@@ -774,6 +774,17 @@ class UniversalUnlockApp(tk.Tk):
                         )
                     else:
                         self.log("[WARN] No supported NVIDIA Ada/Ampere/Turing GPU detected on this host.")
+                    if info.get("code12_auto_recovered"):
+                        self.log(
+                            "[OK] Windows Device Manager Code 12 (post-boot VGA arbitration conflict) was automatically resolved via PnP device restart — "
+                            "NVML/CUDA active and UEFI unlock preserved!"
+                        )
+                    elif info.get("code12_detected"):
+                        self.log(
+                            "[WARN] Windows Device Manager Code 12 detected on GPU (driver stopped by cold-boot VGA arbitration conflict). "
+                            "To bring GPU online immediately without losing unlock: disable & re-enable the GPU in Windows Device Manager "
+                            "(or run this Console as Administrator and click RESCAN HARDWARE). To prevent Code 12 permanently, disable 'CSM Support' in BIOS."
+                        )
                     if info.get("esp_ambiguous"):
                         self.log("[WARN] Multiple EFI System Partitions detected; verify the selected ESP GUID before building.")
                     if info.get("bitlocker_protection_on"):
