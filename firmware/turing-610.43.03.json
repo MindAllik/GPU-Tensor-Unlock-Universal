@@ -25,7 +25,7 @@
   "shared_gsp": {
     "filename": "gsp_tu10x.bin",
     "package_path": "usr/lib/firmware/nvidia/610.43.03/gsp_tu10x.bin",
-    "size": 46778072,
+    "size": 29352832,
     "sha256": "d9d9e0f23ccaa9f82e6879c97a7fb0962a421f7b713ba9ff2169641d34ef47be",
     "signature_section": ".fwsignature_tu10x"
   },

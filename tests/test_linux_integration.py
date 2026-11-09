@@ -593,5 +593,50 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
             self.assertEqual(out_gsp.read_bytes(), payload_bytes)
 
 
+
+    def test_v129_elf64_gsp_section_validator_and_turing_assets(self) -> None:
+        """Verify v1.2.9 fixes:
+        1. _validate_gsp_elf_sections unpacks all 6 uint16 fields at ELF64 offset 52..64 (<HHHHHH).
+        2. Turing .fwsignature_tu10x accepts RSA-3K (384 B) signatures (16..65536 B).
+        3. Version is 1.2.9 across README.md, core_detector.py, and UEFI headers.
+        """
+        import struct, tempfile
+        self.assertEqual(core_detector.get_app_version(), "1.2.9")
+        shstrtab = b"\x00.shstrtab\x00.fwimage\x00.fwsignature_tu10x\x00"
+        while len(shstrtab) % 8 != 0:
+            shstrtab += b"\x00"
+        fwimage_off = 64 + len(shstrtab)
+        fwimage_sz = 13 * 1024 * 1024
+        fwsig_off = fwimage_off + fwimage_sz
+        fwsig_sz = 384
+        sh_off = fwsig_off + fwsig_sz
+        def make_shdr(sh_name: int, sh_type: int, sh_offset: int, sh_size: int) -> bytes:
+            return struct.pack("<IIQQQQIIQQ", sh_name, sh_type, 0, 0, sh_offset, sh_size, 0, 0, 1, 0)
+        shdrs = (
+            make_shdr(0, 0, 0, 0) +
+            make_shdr(1, 3, 64, len(shstrtab)) +
+            make_shdr(11, 1, fwimage_off, fwimage_sz) +
+            make_shdr(20, 1, fwsig_off, fwsig_sz)
+        )
+        ehdr = bytearray(64)
+        ehdr[0:4] = b"\x7fELF"
+        ehdr[4] = 2
+        ehdr[5] = 1
+        ehdr[6] = 1
+        struct.pack_into("<HHIQQQIHHHHHH", ehdr, 16, 2, 0, 1, 0, 0, sh_off, 0, 64, 0, 0, 64, 4, 1)
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tf:
+            tf.write(bytes(ehdr))
+            tf.write(shstrtab)
+            tf.seek(fwsig_off)
+            tf.write(b"\xbb" * fwsig_sz)
+            tf.write(shdrs)
+            elf_p = Path(tf.name)
+        try:
+            self.assertTrue(core_detector._validate_gsp_elf_sections(elf_p, is_turing=True))
+            self.assertFalse(core_detector._validate_gsp_elf_sections(elf_p, is_turing=False))
+        finally:
+            elf_p.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     unittest.main()

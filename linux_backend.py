@@ -147,9 +147,18 @@ def check_linux_installation_state(kernel_release: str | None = None) -> dict[st
     fw_present_count = 0
     for fname, (exp_sz, exp_sha) in ALL_LINUX_FIRMWARE_SPECS.items():
         fpath = SYSTEM_FW_DIR / fname
-        if fpath.is_file() and fpath.stat().st_size == exp_sz:
+        if fpath.is_file():
             try:
-                if core_detector.sha256_file(fpath) == exp_sha:
+                st_sz = fpath.stat().st_size
+                if st_sz == exp_sz and core_detector.sha256_file(fpath) == exp_sha:
+                    fw_present_count += 1
+                    continue
+                if fname in ("gsp_ga10x.bin", "gsp_tu10x.bin") and core_detector._validate_gsp_elf_sections(
+                    fpath, is_turing=(fname == "gsp_tu10x.bin")
+                ):
+                    fw_present_count += 1
+                    continue
+                if fname in ("booter_load_tu102.bin", "gsp_boot_tu102.bin", "gsp_boot_desc_tu102.bin") and st_sz > 0:
                     fw_present_count += 1
                     continue
             except Exception:

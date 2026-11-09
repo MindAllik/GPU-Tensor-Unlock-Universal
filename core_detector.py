@@ -36,7 +36,7 @@ def get_app_version() -> str:
         m = re.search(r"\*\*Version:\s*([0-9]+\.[0-9]+\.[0-9]+)\*\*", readme.read_text(encoding="utf-8", errors="replace"))
         if m:
             return m.group(1)
-    return "1.2.8"
+    return "1.2.9"
 
 
 APP_VERSION: str = get_app_version()
@@ -240,9 +240,9 @@ ASSET_SPECS_GA = {
 ASSET_SPECS_TU = {
     "booter_load_tu102.bin": (59224, "a5cd2eb6a92f343003eb3da67905318dc24f59f77dc02fb48b6389098fbffdb5"),
     "v67-tu102-610.43.03.bin": (64000, "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024"),
-    "gsp_tu10x.bin": (46778072, "d9d9e0f23ccaa9f82e6879c97a7fb0962a421f7b713ba9ff2169641d34ef47be"),
-    "gsp_boot_tu102.bin": (16384, "b2bdccbb79ad4dd48d85c35b00d9ccdf34625bd323805be3f9045a4a24d09fa5"),
-    "gsp_boot_desc_tu102.bin": (84, "d66ab92e021b08d58045569df6956ef1bc742c57e7b31736b172578df87eb0e8"),
+    "gsp_tu10x.bin": (29352832, "d9d9e0f23ccaa9f82e6879c97a7fb0962a421f7b713ba9ff2169641d34ef47be"),
+    "gsp_boot_tu102.bin": (4096, "b2bdccbb79ad4dd48d85c35b00d9ccdf34625bd323805be3f9045a4a24d09fa5"),
+    "gsp_boot_desc_tu102.bin": (76, "d66ab92e021b08d58045569df6956ef1bc742c57e7b31736b172578df87eb0e8"),
 }
 
 SOURCE_C_FILES = {
@@ -2734,7 +2734,7 @@ def _validate_gsp_elf_sections(path: Path, is_turing: bool, is_ada: bool = False
                 return False
             e_version = struct.unpack_from("<I", ehdr, 20)[0]
             e_shoff = struct.unpack_from("<Q", ehdr, 40)[0]
-            e_ehsize, e_shentsize, e_shnum, e_shstrndx = struct.unpack_from("<HHHH", ehdr, 52)
+            e_ehsize, _e_phentsize, _e_phnum, e_shentsize, e_shnum, e_shstrndx = struct.unpack_from("<HHHHHH", ehdr, 52)
             if e_version != 1 or e_ehsize != 64 or e_shentsize != 64 or e_shnum == 0 or e_shnum > 512 or e_shstrndx >= e_shnum:
                 return False
             if e_shoff > file_size or e_shnum * e_shentsize > file_size - e_shoff:
@@ -2772,7 +2772,8 @@ def _validate_gsp_elf_sections(path: Path, is_turing: bool, is_ada: bool = False
             if sig_sec not in sections:
                 return False
             sig_off, sig_sz = sections[sig_sec]
-            if sig_sz != 4096 or sig_off + sig_sz > file_size:
+            valid_sig_sz = (16 <= sig_sz <= 65536) if is_turing else (sig_sz == 4096)
+            if not valid_sig_sz or sig_off + sig_sz > file_size:
                 return False
         return True
     except Exception:

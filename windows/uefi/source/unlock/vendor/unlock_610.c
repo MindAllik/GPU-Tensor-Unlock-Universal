@@ -45,7 +45,7 @@
 #define BOOT_DESC_FILE "gpu-unlock/610.43.03/gsp_boot_desc_tu102.bin"
 #define GSP_SIG_SECTION ".fwsignature_tu10x"
 #ifndef GU_TU102_BOOT_SIZE
-#define GU_TU102_BOOT_SIZE 16384u
+#define GU_TU102_BOOT_SIZE 4096u
 #endif
 #define EXPECTED_BOOT_SIZE GU_TU102_BOOT_SIZE
 #elif !defined(GU_ARCH_ADA) || GU_ARCH_ADA
@@ -784,7 +784,7 @@ static int unlock_transaction_assets(struct unlock_transaction_work *work)
 	if (ret)
 		return GU_RESULT(ret);
 	if (!work->image_span.size || work->image_span.size > 128ull << 20 ||
-	    work->sig_span.size != 4096)
+	    (GU_ARCH_TURING ? (work->sig_span.size < 16 || work->sig_span.size > 65536) : (work->sig_span.size != 4096)))
 		return GU_RESULT(-EINVAL);
 	ret = gpu_unlock_radix_plan(work->image_span.size, &work->radix);
 	if (ret)

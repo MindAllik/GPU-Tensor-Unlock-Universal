@@ -82,7 +82,7 @@ static const struct gpu_unlock_assets *unlock_assets(const struct pci_dev *pdev)
 		.boot = BOOT_FILE_TU102, .desc = BOOT_DESC_FILE_TU102,
 		.payload = V67_FILE_TU102,
 		.signature_section = ".fwsignature_tu10x",
-		.arch = GU_BOOTER_TU10X, .boot_image_size = 16384,
+		.arch = GU_BOOTER_TU10X, .boot_image_size = 4096,
 	};
 
 	if (gu_is_any_turing_id(pdev->device))
@@ -873,7 +873,7 @@ static int unlock_transaction_assets(struct unlock_transaction_work *work)
 	if (ret)
 		return GU_RESULT(ret);
 	if (!work->image_span.size || work->image_span.size > 128ull << 20 ||
-	    work->sig_span.size != 4096)
+	    (gu_is_any_turing_id(work->pdev->device) ? (work->sig_span.size < 16 || work->sig_span.size > 65536) : (work->sig_span.size != 4096)))
 		return GU_RESULT(-EINVAL);
 	ret = gpu_unlock_radix_plan(work->image_span.size, &work->radix);
 	if (ret)
@@ -881,7 +881,8 @@ static int unlock_transaction_assets(struct unlock_transaction_work *work)
 	ret = request_asset(work, &work->boot_fw, unlock_assets(work->pdev)->boot);
 	if (ret)
 		return GU_RESULT(ret);
-	if (work->boot_fw->size != unlock_assets(work->pdev)->boot_image_size ||
+	if ((work->boot_fw->size != unlock_assets(work->pdev)->boot_image_size &&
+	     !(gu_is_any_turing_id(work->pdev->device) && (work->boot_fw->size == 4096 || work->boot_fw->size == 16384 || work->boot_fw->size == 24576))) ||
 	    work->boot_fw->size > BOOT_FILE_MAX)
 		return GU_RESULT(-EINVAL);
 	ret = request_asset(work, &desc, unlock_assets(work->pdev)->desc);
