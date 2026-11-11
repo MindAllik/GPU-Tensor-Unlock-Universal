@@ -97,7 +97,20 @@ All register overrides are volatile and reside in GPU MMIO space until the next 
      python3 tools/read_sm_rates.py --expect-uuid <GPU_UUID>
      ```
 
-## 3. Rollback
+## 3. Laptop / Mobile GPU Notes (MUX / Optimus & Linux Runtime D3)
+
+- **Windows 10 / 11 UEFI (`BOOTX64.EFI`)**:
+  - Supports both MUXed (`dGPU-only` / `Ultimate` mode, PCI class `0x0300`) and MUXless / Advanced Optimus laptops (`3D controller`, PCI class `0x0302`, `targetGops == 0`).
+  - Automatically wakes the dGPU from `D1..D3hot` to `D0`, enables PCI Memory Space Decode (`PCI_COMMAND |= 0x0002`), and enables Upstream PCI-to-PCI Root Port Bus Master (`GuEnsureUpstreamBridgeMaster`) during the SEC2/GSP DMA transaction.
+  - If your laptop BIOS powers off the dGPU rail (`D3cold`, `BAR0 = 0xffffffff`) or skips VBIOS OptionROM pre-initialization (`GFW_PLM` closed) in hybrid mode, switch the laptop MUX to **dGPU / Ultimate mode** in BIOS or OEM software (or connect an external monitor to the dGPU port) and cold-boot.
+- **Linux (`gpu_unlock.ko`)**:
+  - Disable NVIDIA Runtime D3 (`RTD3`) so the driver does not power off the dGPU into `D3cold` after ~15 seconds of idle and reset `SS0`/`SS1` back to stock half-rate:
+    ```sh
+    echo "options nvidia NVreg_DynamicPowerManagement=0x00" | sudo tee /etc/modprobe.d/nvidia-runtimepm.conf
+    ```
+  - Rebuild your `initramfs` (`sudo mkinitcpio -P`, `sudo update-initramfs -u`, or `sudo dracut --regenerate-all --force`) and perform a cold power-off.
+
+## 4. Rollback
 
 - **Windows 10 / 11**: Shut down the PC (cold power-off), remove the USB flash drive, and boot normally from your system SSD. All GPU registers return to factory defaults on power-off. Re-enable Secure Boot and BitLocker if you disabled or suspended them.
 - **Linux**: Remove the `gpu_unlock.*` parameters from your bootloader configuration (`GRUB2`, `grubby`, or `systemd-boot`), update the bootloader config, and perform a cold power-off. If a firmware transaction failed and retained DMA pages (`retained=true`), perform a full AC power-off rather than attempting to force-unload `gpu_unlock.ko`.

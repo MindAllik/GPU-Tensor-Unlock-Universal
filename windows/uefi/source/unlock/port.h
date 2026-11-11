@@ -8,7 +8,7 @@
 #include "local_profile.h"
 
 #ifndef GU_APP_VERSION
-#define GU_APP_VERSION "1.2.9"
+#define GU_APP_VERSION "1.3.0"
 #endif
 
 #ifndef GU_BOARD_ID
@@ -46,6 +46,9 @@
 #endif
 #ifndef GU_ARCH_TURING
 #define GU_ARCH_TURING 0
+#endif
+#ifndef GU_IS_MOBILE_GPU
+#define GU_IS_MOBILE_GPU 0
 #endif
 #ifndef GU_EXPECTED_COLD_PLM
 #define GU_EXPECTED_COLD_PLM 0xffffff8fU

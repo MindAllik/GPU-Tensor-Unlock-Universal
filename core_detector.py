@@ -36,7 +36,7 @@ def get_app_version() -> str:
         m = re.search(r"\*\*Version:\s*([0-9]+\.[0-9]+\.[0-9]+)\*\*", readme.read_text(encoding="utf-8", errors="replace"))
         if m:
             return m.group(1)
-    return "1.2.9"
+    return "1.3.0"
 
 
 APP_VERSION: str = get_app_version()
@@ -164,6 +164,62 @@ SUPPORT_MATRIX: dict[int, tuple[str, int, bool, str, str]] = {
     0x1F0B: ("TU106", 0x166000A1, False, "experimental_simulated", "NVIDIA CMP 40HX"),
     0x1F42: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 SUPER (0x1F42)"),
     0x1F47: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 SUPER (TU106)"),
+    # Laptop / Mobile Ada Lovelace (AD103M / AD104M / AD106M / AD107M) SKUs
+    0x2717: ("AD103", 0x193000A1, True, "experimental_simulated", "GeForce RTX 4090 Laptop GPU"),
+    0x2757: ("AD103", 0x193000A1, True, "experimental_simulated", "GeForce RTX 4090 Laptop GPU (0x2757)"),
+    0x27A0: ("AD104", 0x194000A1, True, "experimental_simulated", "GeForce RTX 4080 Laptop GPU"),
+    0x27E0: ("AD104", 0x194000A1, True, "experimental_simulated", "GeForce RTX 4080 Laptop GPU (0x27E0)"),
+    0x2820: ("AD106", 0x196000A1, True, "experimental_simulated", "GeForce RTX 4070 Laptop GPU"),
+    0x2860: ("AD106", 0x196000A1, True, "experimental_simulated", "GeForce RTX 4070 Laptop GPU (0x2860)"),
+    0x28A0: ("AD107", 0x197000A1, True, "experimental_simulated", "GeForce RTX 4060 Laptop GPU"),
+    0x28A1: ("AD107", 0x197000A1, True, "experimental_simulated", "GeForce RTX 4050 Laptop GPU"),
+    0x28E0: ("AD107", 0x197000A1, True, "experimental_simulated", "GeForce RTX 4060 Laptop GPU (0x28E0)"),
+    0x28E1: ("AD107", 0x197000A1, True, "experimental_simulated", "GeForce RTX 4050 Laptop GPU (0x28E1)"),
+    # Laptop / Mobile Ampere (GA103M / GA106M / GA107M) SKUs
+    0x2420: ("GA103", 0x173000A1, False, "experimental_simulated", "GeForce RTX 3080 Ti Laptop GPU"),
+    0x2460: ("GA103", 0x173000A1, False, "experimental_simulated", "GeForce RTX 3080 Ti Laptop GPU (0x2460)"),
+    0x2520: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3060 Laptop GPU"),
+    0x2523: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3050 Ti Laptop GPU (GA106M)"),
+    0x2560: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3060 Laptop GPU (0x2560)"),
+    0x2563: ("GA106", 0x176000A1, False, "experimental_simulated", "GeForce RTX 3050 Ti Laptop GPU (0x2563)"),
+    0x25A0: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 3050 Ti Laptop GPU"),
+    0x25A2: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 3050 Laptop GPU"),
+    0x25A5: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 3050 Laptop GPU (0x25A5)"),
+    0x25A6: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 3050 Mobile (0x25A6)"),
+    0x25A9: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 2050 Laptop GPU (GA107M)"),
+    0x25AB: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 3050 Ti Mobile (0x25AB)"),
+    0x25AC: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 3050 Mobile (0x25AC)"),
+    0x25AD: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 2050 Mobile (0x25AD)"),
+    0x25E0: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 3050 Ti Laptop GPU (0x25E0)"),
+    0x25E2: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 3050 Laptop GPU (0x25E2)"),
+    0x25E5: ("GA107", 0x177000A1, False, "experimental_simulated", "GeForce RTX 3050 Mobile (0x25E5)"),
+    # Laptop / Mobile Turing (TU104M / TU106M) SKUs
+    0x1E90: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2080 Mobile"),
+    0x1E91: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2070 SUPER Mobile"),
+    0x1E93: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2080 SUPER Mobile"),
+    0x1EAB: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2070 SUPER Max-Q"),
+    0x1ED0: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2080 Mobile (0x1ED0)"),
+    0x1ED1: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2070 SUPER Mobile (0x1ED1)"),
+    0x1ED3: ("TU104", 0x164000A1, False, "experimental_simulated", "GeForce RTX 2080 SUPER Mobile (0x1ED3)"),
+    0x1F10: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2070 Mobile"),
+    0x1F11: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 Mobile"),
+    0x1F12: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 Max-Q"),
+    0x1F14: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2070 Mobile Refresh"),
+    0x1F15: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 Mobile Refresh"),
+    0x1F2E: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 Mobile (0x1F2E)"),
+    0x1F50: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2070 Mobile (0x1F50)"),
+    0x1F51: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 Mobile (0x1F51)"),
+    0x1F54: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2070 Mobile (0x1F54)"),
+    0x1F55: ("TU106", 0x166000A1, False, "experimental_simulated", "GeForce RTX 2060 Mobile (0x1F55)"),
+}
+
+MOBILE_PCI_IDS: set[int] = {
+    0x2717, 0x2757, 0x27A0, 0x27E0, 0x2820, 0x2860, 0x28A0, 0x28A1, 0x28E0, 0x28E1,
+    0x2420, 0x2460, 0x249C, 0x249D, 0x24A0, 0x24DC, 0x24DD, 0x24E0,
+    0x2520, 0x2523, 0x2560, 0x2563, 0x2583,
+    0x25A0, 0x25A2, 0x25A5, 0x25A6, 0x25A9, 0x25AB, 0x25AC, 0x25AD, 0x25E0, 0x25E2, 0x25E5,
+    0x1E90, 0x1E91, 0x1E93, 0x1EAB, 0x1ED0, 0x1ED1, 0x1ED3,
+    0x1F10, 0x1F11, 0x1F12, 0x1F14, 0x1F15, 0x1F2E, 0x1F50, 0x1F51, 0x1F54, 0x1F55,
 }
 
 
@@ -172,18 +228,19 @@ def _enrich_generic_gpu_name(raw_name: str, dev16: int) -> str:
     clean = (raw_name or "").strip()
     if dev16 in SUPPORT_MATRIX:
         model_hint = SUPPORT_MATRIX[dev16][4]
-        if not clean or clean.upper() in ("NVIDIA GRAPHICS DEVICE", "NVIDIA GPU", "VGA COMPATIBLE CONTROLLER"):
+        if not clean or clean.upper() in ("NVIDIA GRAPHICS DEVICE", "NVIDIA GPU", "VGA COMPATIBLE CONTROLLER", "3D CONTROLLER"):
             return f"{clean or 'NVIDIA GPU'} [{model_hint}]"
     return clean or "NVIDIA GPU"
 
 
 def classify_pci_device(device_id_16: int, gpu_name: str = "", sm_version: str = "") -> dict[str, Any]:
-    """Classify a 16-bit NVIDIA PCI Device ID against the explicit SUPPORT_MATRIX."""
+    """Classify a 16-bit NVIDIA PCI Device ID against the explicit SUPPORT_MATRIX (desktop & laptop/mobile)."""
     name_up = (gpu_name or "").upper()
     is_mobile_hint = any(tok in name_up for tok in ("LAPTOP", "MOBILE", "MAX-Q"))
-    if device_id_16 in SUPPORT_MATRIX and not is_mobile_hint:
+    if device_id_16 in SUPPORT_MATRIX:
         die, chip_id, is_ada, tier, model = SUPPORT_MATRIX[device_id_16]
         is_turing = die.startswith("TU10")
+        is_mobile = bool(device_id_16 in MOBILE_PCI_IDS or is_mobile_hint or any(tok in model.upper() for tok in ("LAPTOP", "MOBILE", "MAX-Q")))
         expected_sm = "sm_75" if is_turing else ("sm_89" if is_ada else "sm_86")
         if sm_version and sm_version != expected_sm:
             return {
@@ -193,6 +250,7 @@ def classify_pci_device(device_id_16: int, gpu_name: str = "", sm_version: str =
                 "chip_id": 0,
                 "is_ada": False,
                 "is_turing": False,
+                "is_mobile": is_mobile,
                 "reason": f"Compute capability {sm_version} conflicts with PCI ID 0x{device_id_16:04x} (expected {expected_sm})",
             }
         return {
@@ -202,6 +260,7 @@ def classify_pci_device(device_id_16: int, gpu_name: str = "", sm_version: str =
             "chip_id": chip_id,
             "is_ada": is_ada,
             "is_turing": is_turing,
+            "is_mobile": is_mobile,
             "model_hint": model,
             "reason": "OK",
         }
@@ -212,6 +271,7 @@ def classify_pci_device(device_id_16: int, gpu_name: str = "", sm_version: str =
         "chip_id": 0,
         "is_ada": False,
         "is_turing": False,
+        "is_mobile": is_mobile_hint,
         "reason": f"PCI Device ID 0x{device_id_16:04x} ({gpu_name or 'unknown'}) is not in SUPPORT_MATRIX",
     }
 
@@ -584,6 +644,7 @@ def validate_target_profile(config: dict[str, Any]) -> dict[str, Any]:
         "die_name": die_name,
         "is_ada": is_ada,
         "is_turing": is_turing,
+        "is_mobile": bool(support.get("is_mobile", False)),
         "support_tier": support["support_tier"],
         "board_id": board_id,
         "subsys_id": subsys_id,
@@ -818,6 +879,18 @@ NOMINAL_VRAM_MIB: dict[int, int] = {
     0x1E81: 8192, 0x1E82: 8192, 0x1E84: 8192, 0x1E87: 8192, 0x1E89: 6144, 0x1EC2: 8192, 0x1EC7: 8192,
     0x1F02: 8192, 0x1F03: 12288, 0x1F06: 8192, 0x1F07: 8192, 0x1F08: 6144, 0x1F0A: 6144, 0x1F0B: 8192,
     0x1F42: 8192, 0x1F47: 8192,
+    # Laptop / Mobile Ada Lovelace
+    0x2717: 16376, 0x2757: 16376, 0x27A0: 12282, 0x27E0: 12282,
+    0x2820: 8188, 0x2860: 8188, 0x28A0: 8188, 0x28A1: 6140, 0x28E0: 8188, 0x28E1: 6140,
+    # Laptop / Mobile Ampere
+    0x2420: 16384, 0x2460: 16384,
+    0x2520: 6144, 0x2523: 4096, 0x2560: 6144, 0x2563: 4096,
+    0x25A0: 4096, 0x25A2: 4096, 0x25A5: 4096, 0x25A6: 4096, 0x25A9: 4096,
+    0x25AB: 4096, 0x25AC: 4096, 0x25AD: 4096, 0x25E0: 4096, 0x25E2: 4096, 0x25E5: 4096,
+    # Laptop / Mobile Turing
+    0x1E90: 8192, 0x1E91: 8192, 0x1E93: 8192, 0x1EAB: 8192, 0x1ED0: 8192, 0x1ED1: 8192, 0x1ED3: 8192,
+    0x1F10: 8192, 0x1F11: 6144, 0x1F12: 6144, 0x1F14: 8192, 0x1F15: 6144, 0x1F2E: 6144,
+    0x1F50: 8192, 0x1F51: 6144, 0x1F54: 8192, 0x1F55: 6144,
 }
 
 
@@ -838,9 +911,9 @@ def get_linux_modprobe_command_for_gpu(gpu: dict[str, Any]) -> str:
         return f"modprobe gpu_unlock targets={bdf} turing_experimental=1"
     if not cls["is_ada"] or dev16 == 0x2684:
         return f"modprobe gpu_unlock targets={bdf}"
-    if dev16 in (0x2702, 0x2703, 0x2704, 0x2705, 0x2709):
+    if dev16 in (0x2702, 0x2703, 0x2704, 0x2705, 0x2709, 0x2717, 0x2757):
         return f"modprobe gpu_unlock targets={bdf} ad103_experimental=1"
-    if dev16 in (0x2782, 0x2783, 0x2786, 0x2788, 0x27B0, 0x27B2):
+    if dev16 in (0x2782, 0x2783, 0x2786, 0x2788, 0x27B0, 0x27B2, 0x27A0, 0x27E0):
         return f"modprobe gpu_unlock targets={bdf} ad104_experimental=1"
     return f"modprobe gpu_unlock targets={bdf} ada_experimental=1"
 
@@ -862,9 +935,9 @@ def get_linux_boot_option_for_gpu(gpu: dict[str, Any]) -> str:
         return f"gpu_unlock.targets={bdf} gpu_unlock.turing_experimental=1"
     if not cls["is_ada"] or dev16 == 0x2684:
         return f"gpu_unlock.targets={bdf}"
-    if dev16 in (0x2702, 0x2703, 0x2704, 0x2705, 0x2709):
+    if dev16 in (0x2702, 0x2703, 0x2704, 0x2705, 0x2709, 0x2717, 0x2757):
         return f"gpu_unlock.targets={bdf} gpu_unlock.ad103_experimental=1"
-    if dev16 in (0x2782, 0x2783, 0x2786, 0x2788, 0x27B0, 0x27B2):
+    if dev16 in (0x2782, 0x2783, 0x2786, 0x2788, 0x27B0, 0x27B2, 0x27A0, 0x27E0):
         return f"gpu_unlock.targets={bdf} gpu_unlock.ad104_experimental=1"
     return f"gpu_unlock.targets={bdf} gpu_unlock.ada_experimental=1"
 
@@ -1259,6 +1332,7 @@ def detect_host_environment() -> dict[str, Any]:
                             "die_name": cls["die_name"],
                             "chip_id_hex": f"0x{cls['chip_id']:08x}" if cls["chip_id"] else "",
                             "is_ada": cls["is_ada"],
+                            "is_mobile": cls.get("is_mobile", False),
                             "support_tier": cls["support_tier"],
                             "supported": cls["supported"],
                             "vram_mib": vram_mib,
@@ -1328,6 +1402,7 @@ def detect_host_environment() -> dict[str, Any]:
                 "die_name": cls["die_name"],
                 "chip_id_hex": f"0x{cls['chip_id']:08x}" if cls["chip_id"] else "",
                 "is_ada": cls["is_ada"],
+                "is_mobile": cls.get("is_mobile", False),
                 "support_tier": cls["support_tier"],
                 "supported": cls["supported"],
                 "vram_mib": sg["vram_mib"],
@@ -1369,6 +1444,7 @@ def detect_host_environment() -> dict[str, Any]:
                 "die_name": cls["die_name"],
                 "chip_id_hex": f"0x{cls['chip_id']:08x}" if cls["chip_id"] else "",
                 "is_ada": cls["is_ada"],
+                "is_mobile": cls.get("is_mobile", False),
                 "support_tier": cls["support_tier"],
                 "supported": cls["supported"],
                 "vram_mib": NOMINAL_VRAM_MIB.get(pg["dev16"], 0),
@@ -1412,6 +1488,7 @@ def detect_host_environment() -> dict[str, Any]:
                 "die_name": cls["die_name"],
                 "chip_id_hex": f"0x{cls['chip_id']:08x}" if cls["chip_id"] else "",
                 "is_ada": cls["is_ada"],
+                "is_mobile": cls.get("is_mobile", False),
                 "support_tier": cls["support_tier"],
                 "supported": cls["supported"],
                 "vram_mib": nom_vram,
@@ -1432,7 +1509,7 @@ def detect_host_environment() -> dict[str, Any]:
         for k in (
             "gpu_name", "gpu_uuid", "pci_bdf", "board_id_hex", "subsystem_id_hex",
             "segment_hex", "bus_hex", "device_hex", "function_hex", "die_name",
-            "chip_id_hex", "is_ada", "support_tier", "vram_mib", "vram_min_hex",
+            "chip_id_hex", "is_ada", "is_mobile", "support_tier", "vram_mib", "vram_min_hex",
             "vram_max_hex", "vbios_version", "power_default_w", "power_min_w",
             "power_max_w", "bound_driver", "linux_boot_option", "verification_sources",
         ):
@@ -3215,7 +3292,11 @@ def build_and_stage_usb(
                 break
 
         booter_bin = build_booter_bundle(c_texts[booter_c_name])
-        boot_bin = _array_bytes(c_texts[boot_c_name], "UCODE_IMAGE_PROD")
+        if is_turing and "BINDATA_LABEL_UCODE_IMAGE_DBG_data[]" in c_texts[boot_c_name]:
+            dbg_bin = _array_bytes(c_texts[boot_c_name], "UCODE_IMAGE_DBG")
+            boot_bin = dbg_bin[:0x6000] if len(dbg_bin) >= 0x6000 else dbg_bin
+        else:
+            boot_bin = _array_bytes(c_texts[boot_c_name], "UCODE_IMAGE_PROD")
         desc_bin = _array_bytes(c_texts[boot_c_name], "UCODE_DESC_PROD")
 
         gsp_fname = "gsp_tu10x.bin" if is_turing else "gsp_ga10x.bin"
@@ -3285,6 +3366,7 @@ def build_and_stage_usb(
 #define GU_VRAM_MAX_MIB 0x{validated['vram_max']:x}U
 #define GU_ARCH_ADA {1 if is_ada else 0}
 #define GU_ARCH_TURING {1 if is_turing else 0}
+#define GU_IS_MOBILE_GPU {1 if validated.get('is_mobile') else 0}
 #define GU_EXPECTED_COLD_PLM 0xffffff8fU
 #define GU_EXPECTED_POST_FLR_PLM 0xffffffffU
 {tu_profile_defines}
@@ -3610,7 +3692,9 @@ def set_gpu_power_limit(
     and verifying the applied limit via NVML or nvidia-smi readback (F16 / M-07 / U09)."""
     if not gpu_uuid or not re.fullmatch(r"GPU-[0-9a-fA-F-]{32,40}", gpu_uuid.strip()):
         raise ValueError("Refusing to set power limit without a verified GPU UUID")
-    if min_watts <= 0 or max_watts <= 0 or not (min_watts <= target_watts <= max_watts):
+    if min_watts <= 0 or max_watts <= 0:
+        raise ValueError("Manual power limit control is locked by firmware on this GPU (Laptop Dynamic Boost / [N/A]); power is managed automatically by the EC.")
+    if not (min_watts <= target_watts <= max_watts):
         raise ValueError(f"Requested power limit {target_watts} W is outside verified hardware constraints [{min_watts}..{max_watts}] W")
 
     watts_int = int(round(target_watts))

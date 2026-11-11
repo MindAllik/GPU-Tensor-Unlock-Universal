@@ -240,6 +240,12 @@ int main(int argc, char **argv)
 		assert(!gpu_unlock_boot_desc_parse(desc, sizeof(desc), 24576, &boot));
 		assert(boot.code_offset == 6144 && boot.data_offset == 2048 && !boot.manifest_offset);
 		assert(gpu_unlock_boot_desc_parse(desc, 83, 24576, &boot) == -EINVAL);
+		{
+			unsigned char desc76[76] = {0};
+			assert(!gpu_unlock_boot_desc_parse(desc76, 76, 24576, &boot));
+			assert(boot.manifest_offset == 0 && boot.data_offset == 0x800 &&
+			       boot.code_offset == 0x1800 && boot.image_size == 24576);
+		}
 		put32(desc+48, ~0u);
 		assert(gpu_unlock_boot_desc_parse(desc, 84, 24576, &boot) == -ERANGE);
 		{

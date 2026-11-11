@@ -259,8 +259,50 @@ static EFI_STATUS RestoreDecode(VOID) {
   if(!GuLogReady() || Gu.fault)return EFI_DEVICE_ERROR;
   return matched?EFI_SUCCESS:EFI_COMPROMISED_DATA;
 }
+static VOID WakeMobileTargetBeforeCheck(UINT32 ClassRev) {
+  /* On hybrid / MUXless laptops (3D controller 0x0302 or GU_IS_MOBILE_GPU),
+     UEFI firmware may leave the discrete NVIDIA GPU in D1..D3hot or with
+     Memory Space Decode (PCI_COMMAND bit 1) disabled when no GOP driver bound
+     to the dGPU. Wake to D0 and enable MMIO decode before initial ConfigCheck. */
+  if(!Gu.pci || (!GU_IS_MOBILE_GPU && (((ClassRev>>16)&0xffU)!=0x02U)))return;
+  UINT32 st_cmd=0,cap_dword=0,bar0=0;
+  if(EFI_ERROR(Gu.pci->Pci.Read(Gu.pci,EfiPciIoWidthUint32,0x04,1,&st_cmd)) ||
+     EFI_ERROR(Gu.pci->Pci.Read(Gu.pci,EfiPciIoWidthUint32,0x34,1,&cap_dword)) ||
+     EFI_ERROR(Gu.pci->Pci.Read(Gu.pci,EfiPciIoWidthUint32,0x10,1,&bar0)))return;
+  if(((st_cmd>>16)&0x10U)!=0U) {
+    UINT8 ptr=(UINT8)(cap_dword&0xfcU);
+    for(UINTN step=0;step<48 && ptr>=0x40U;step++) {
+      UINT32 hdr=0;
+      if(EFI_ERROR(Gu.pci->Pci.Read(Gu.pci,EfiPciIoWidthUint32,ptr,1,&hdr)))break;
+      if((hdr&0xffU)==0x01U) {
+        UINT16 pmcsr=0;
+        if(!EFI_ERROR(Gu.pci->Pci.Read(Gu.pci,EfiPciIoWidthUint16,(UINT32)ptr+4U,1,&pmcsr)) && (pmcsr&3U)!=0U) {
+          UINT16 d0=(UINT16)(pmcsr&~3U);
+          Gu.pci->Pci.Write(Gu.pci,EfiPciIoWidthUint16,(UINT32)ptr+4U,1,&d0);
+          if(Gu.bs && Gu.bs->Stall)Gu.bs->Stall(10000);
+          GuLog("laptop/hybrid dGPU PM wake: pm_cap=%#x pmcsr=%#x->%#x\n",(unsigned)ptr,(unsigned)pmcsr,(unsigned)d0);
+        }
+        break;
+      }
+      ptr=(UINT8)((hdr>>8)&0xfcU);
+    }
+  }
+  UINT16 cmd=(UINT16)(st_cmd&0xffffU);
+  if(!(cmd&2U) && (bar0&~0xfU)!=0U && bar0!=0xffffffffU) {
+    if(Gu.pci->Attributes) {
+      Gu.pci->Attributes(Gu.pci,EfiPciIoAttributeOperationEnable,EFI_PCI_IO_ATTRIBUTE_MEMORY,NULL);
+    }
+    UINT16 after_cmd=0;
+    if(!EFI_ERROR(Gu.pci->Pci.Read(Gu.pci,EfiPciIoWidthUint16,0x04,1,&after_cmd)) && !(after_cmd&2U)) {
+      UINT16 new_cmd=(UINT16)(after_cmd|2U);
+      Gu.pci->Pci.Write(Gu.pci,EfiPciIoWidthUint16,0x04,1,&new_cmd);
+      Gu.pci->Pci.Read(Gu.pci,EfiPciIoWidthUint16,0x04,1,&after_cmd);
+    }
+    GuLog("laptop/hybrid dGPU MMIO decode wake: cmd=%#x->%#x\n",(unsigned)cmd,(unsigned)after_cmd);
+  }
+}
 static EFI_STATUS FindTarget(VOID) {
-  EFI_HANDLE *handles=NULL;UINTN count=0,found=0;
+  EFI_HANDLE *handles=NULL;UINTN count=0,found=0;UINT32 target_class_rev=0;
   EFI_STATUS status=Gu.bs->LocateHandleBuffer(ByProtocol,&PciGuid,NULL,&count,&handles);
   GuLog("PCI enumeration: status=%#llx handles=%zu\n",(unsigned long long)status,(size_t)count);
   /* LocateHandleBuffer supplies a pool-backed array sized to Count, across
@@ -279,7 +321,7 @@ static EFI_STATUS FindTarget(VOID) {
       if(EFI_ERROR(ls) || EFI_ERROR(ss) || EFI_ERROR(cs)){status=EFI_DEVICE_ERROR;break;}
       if(id==GU_BOARD_ID && seg==GU_BOARD_SEGMENT && bus==GU_BOARD_BUS && dev==GU_BOARD_DEVICE &&
          func==GU_BOARD_FUNCTION && (GU_BOARD_SUBSYSTEM==0U || subsys==GU_BOARD_SUBSYSTEM)) {
-        found++;Gu.handle=handles[i];Gu.pci=pci;
+        found++;Gu.handle=handles[i];Gu.pci=pci;target_class_rev=class_rev;
       } else if((class_rev>>24)==0x03U || id==GU_BOARD_ID) {
         GuLog("PCI non-target candidate skipped: BDF=%zu:%zu:%zu.%zu id=%#x subsys=%#x (expected BDF=%u:%u:%u.%u id=%#x subsys=%#x)\n",
           (size_t)seg,(size_t)bus,(size_t)dev,(size_t)func,id,subsys,
@@ -288,8 +330,9 @@ static EFI_STATUS FindTarget(VOID) {
       }
     }
   }
-  GuFree(handles);GuLog("PCI target matches=%zu status=%#llx\n",(size_t)found,(size_t)status);
+  GuFree(handles);GuLog("PCI target matches=%zu status=%#llx\n",(size_t)found,(unsigned long long)status);
   if(EFI_ERROR(status) || found!=1)return EFI_UNSUPPORTED;
+  WakeMobileTargetBeforeCheck(target_class_rev);
   return ConfigCheck(TRUE);
 }
 static EFI_STATUS BarCheck(VOID) {
@@ -319,7 +362,12 @@ static EFI_STATUS BarCheck(VOID) {
 }
 static EFI_STATUS ColdCheck(VOID) {
   UINT32 chip=GuRead32(0);GuLog("chip: actual=%#x expected=%#x\n",chip,GU_BOARD_CHIP);
-  if(!GuValidArchChip(chip) || (LatchedChip && chip!=LatchedChip))return EFI_UNSUPPORTED;
+  if(!GuValidArchChip(chip) || (LatchedChip && chip!=LatchedChip)) {
+    if(!Gu.fault && (chip==0xffffffffU || GuInaccessible32(chip))) {
+      GuLog("laptop/hybrid diagnostic: BAR0 PMC_BOOT_0=%#x unreadable (dGPU in D3cold or unpowered). Switch laptop MUX to dGPU/Ultimate mode or connect an external display to the dGPU port.\n",chip);
+    }
+    return EFI_UNSUPPORTED;
+  }
   LatchedChip=chip;
   struct gpu_unlock_gfw_sample s={.config_ok=true,.plm=GuRead32(GU_GFW_PLM_OFFSET),
     .boot=GuRead32(GU_GFW_BOOT_OFFSET),.cpuctl=GuRead32(GU_GFW_CPUCTL_OFFSET)};

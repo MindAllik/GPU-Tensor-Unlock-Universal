@@ -172,6 +172,8 @@ static int descriptor(const u8 *rom, size_t length, u64 off,
 			fw.imem_va = r32(rom + off + 24);
 			fw.dmem_pa = r32(rom + off + 28);
 			fw.dmem_size = r32(rom + off + 32);
+			fw.imem_sec_base = r32(rom + off + 36) ? r32(rom + off + 36) : 0x400u;
+			fw.imem_sec_size = fw.imem_size > fw.imem_sec_base ? fw.imem_size - fw.imem_sec_base : 0u;
 			fw.interface_off = r32(rom + off + 40);
 		}
 		fw.engine_mask = 0x400;

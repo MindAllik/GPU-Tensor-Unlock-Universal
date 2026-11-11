@@ -674,7 +674,7 @@ class LinuxUnlockApp(tk.Tk):
                 for k in (
                     "gpu_name", "gpu_uuid", "pci_bdf", "board_id_hex", "subsystem_id_hex",
                     "segment_hex", "bus_hex", "device_hex", "function_hex", "die_name",
-                    "chip_id_hex", "is_ada", "support_tier", "vram_mib", "vram_min_hex",
+                    "chip_id_hex", "is_ada", "is_mobile", "support_tier", "vram_mib", "vram_min_hex",
                     "vram_max_hex", "vbios_version", "power_default_w", "power_min_w",
                     "power_max_w", "bound_driver", "linux_boot_option", "linux_modprobe_cmd", "verification_sources",
                 ):

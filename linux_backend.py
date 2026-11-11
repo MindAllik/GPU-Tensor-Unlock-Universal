@@ -125,6 +125,51 @@ def detect_initramfs_and_bootloader() -> dict[str, str]:
     }
 
 
+
+def check_linux_nvidia_rtd3_state(
+    proc_params_path: Path | None = None,
+    etc_conf_path: Path | None = None,
+    usr_lib_conf_path: Path | None = None,
+) -> dict[str, Any]:
+    """Inspect NVIDIA Runtime D3 (RTD3 / DynamicPowerManagement) state on Linux.
+    On laptops, RTD3 (NVreg_DynamicPowerManagement=0x01/0x02) powers off the dGPU into D3cold
+    after ~15s idle, wiping volatile SS0/SS1 registers back to stock half-rate unless
+    /etc/modprobe.d/nvidia-runtimepm.conf sets NVreg_DynamicPowerManagement=0x00."""
+    p_params = proc_params_path if proc_params_path is not None else Path("/proc/driver/nvidia/params")
+    p_etc = etc_conf_path if etc_conf_path is not None else Path("/etc/modprobe.d/nvidia-runtimepm.conf")
+    p_usr = usr_lib_conf_path if usr_lib_conf_path is not None else Path("/usr/lib/modprobe.d/nvidia-runtimepm.conf")
+
+    dyn_pm: int | None = None
+    if p_params.is_file():
+        try:
+            txt = p_params.read_text(encoding="utf-8", errors="replace")
+            m = re.search(r"^DynamicPowerManagement:\s*(\d+)", txt, re.M)
+            if m:
+                dyn_pm = int(m.group(1))
+        except Exception:
+            pass
+
+    etc_disabled = False
+    if p_etc.is_file():
+        try:
+            etc_txt = p_etc.read_text(encoding="utf-8", errors="replace")
+            if re.search(r"NVreg_DynamicPowerManagement\s*=\s*(?:0x0+|0)\b", etc_txt):
+                etc_disabled = True
+        except Exception:
+            pass
+
+    usr_lib_present = p_usr.is_file()
+    rtd3_active = bool((dyn_pm is not None and dyn_pm != 0) or (usr_lib_present and not etc_disabled))
+    return {
+        "dynamic_pm_value": dyn_pm,
+        "rtd3_active": rtd3_active,
+        "etc_disabled_override": etc_disabled,
+        "usr_lib_conf_present": usr_lib_present,
+        "recommended_conf_path": "/etc/modprobe.d/nvidia-runtimepm.conf",
+        "recommended_conf_line": "options nvidia NVreg_DynamicPowerManagement=0x00",
+    }
+
+
 def read_linux_secure_boot() -> bool | None:
     """Read UEFI SecureBoot efivar on Linux if mounted."""
     efivar_dir = Path("/sys/firmware/efi/efivars")
@@ -233,18 +278,29 @@ def detect_linux_environment() -> dict[str, Any]:
     for g in base.get("gpus", []):
         g["linux_modprobe_cmd"] = core_detector.get_linux_modprobe_command_for_gpu(g)
 
+    for g in base.get("gpus", []):
+        if "is_mobile" not in g:
+            try:
+                dev16 = (int(str(g.get("board_id_hex", "0")), 16) >> 16) & 0xFFFF
+            except ValueError:
+                dev16 = 0
+            g["is_mobile"] = bool(core_detector.classify_pci_device(dev16, str(g.get("gpu_name", ""))).get("is_mobile", False))
+
     if base.get("gpus"):
         chosen = next((g for g in base["gpus"] if g.get("supported")), base["gpus"][0])
         base["gpu_detected"] = bool(chosen.get("board_id_hex") and chosen.get("pci_bdf"))
         base["linux_boot_option"] = chosen.get("linux_boot_option") or core_detector.get_linux_boot_option_for_gpu(chosen)
         base["linux_modprobe_cmd"] = chosen.get("linux_modprobe_cmd") or core_detector.get_linux_modprobe_command_for_gpu(chosen)
         base["bound_driver"] = chosen.get("bound_driver", "unknown")
+        base["is_mobile"] = bool(chosen.get("is_mobile", False))
     else:
         base["linux_boot_option"] = "gpu_unlock.targets=<PCI_BDF>"
         base["linux_modprobe_cmd"] = "modprobe gpu_unlock targets=<PCI_BDF>"
         base["bound_driver"] = "none"
+        base["is_mobile"] = False
 
     base.update({
+        "rtd3_state": check_linux_nvidia_rtd3_state(),
         "kernel_release": krel,
         "distro_id": os_rel["id"],
         "distro_family": os_rel["family"],
@@ -499,6 +555,12 @@ def format_bootloader_instructions(boot_option: str, distro_family: str, bootloa
             "  2. Update GRUB:",
             "     sudo update-grub",
         ])
+    lines.extend([
+        "",
+        "[Laptop / Hybrid GPU Note — Prevent Runtime D3 (RTD3) Reset]",
+        "  On laptops, NVIDIA Runtime D3 (D3cold) powers off the dGPU after ~15s idle and resets SS0/SS1:",
+        '  echo "options nvidia NVreg_DynamicPowerManagement=0x00" | sudo tee /etc/modprobe.d/nvidia-runtimepm.conf',
+    ])
     return "\n".join(lines)
 
 
@@ -559,12 +621,21 @@ def install_linux_dkms_and_firmware(
         hook_target = "install-initramfs-tools"
         rebuild_cmd = "update-initramfs -u"
 
+    rtd3_info = env_info.get("rtd3_state") or {}
+    need_rtd3_disable = bool(env_info.get("is_mobile") or rtd3_info.get("rtd3_active"))
+    rtd3_cmd = (
+        "mkdir -p /etc/modprobe.d && "
+        "printf 'options nvidia NVreg_DynamicPowerManagement=0x00\n' > /etc/modprobe.d/nvidia-runtimepm.conf && "
+        if need_rtd3_disable
+        else ""
+    )
     script_cmd = (
         f"set -e; cd '{APP_ROOT}' && "
         f"make ASSETS='{assets_dir}' install-dkms install-firmware install-licenses {hook_target} && "
         f"(dkms status -m gpu-unlock -v '{MODULE_VERSION}' | grep -q . || dkms add -m gpu-unlock -v '{MODULE_VERSION}') && "
         f"dkms build -m gpu-unlock -v '{MODULE_VERSION}' && "
         f"dkms install -m gpu-unlock -v '{MODULE_VERSION}' --force && "
+        f"{rtd3_cmd}"
         f"{rebuild_cmd}"
     )
     log_fn("-" * 76)

@@ -387,6 +387,43 @@ int main(void) {
         )
         r_3090 = subprocess.run([str(probe_3090_exe)], cwd=src_3090, capture_output=True, text=True, check=True)
         print(r_3090.stdout.strip())
+
+        # 6. Laptop / Mobile GPU (AD106M RTX 4070 Laptop 0x282010de, 3D controller 0x030200a1, GU_IS_MOBILE_GPU=1)
+        probe_laptop_c = work / "probe_laptop.c"
+        probe_laptop_c.write_text("""
+#include "port.h"
+int puts(const char *s);
+void abort(void);
+#define CHECK_TRUE(cond) do { if (!(cond)) abort(); } while (0)
+int main(void) {
+    CHECK_TRUE(GU_IS_MOBILE_GPU == 1);
+    CHECK_TRUE(GuValidArchChip(0x196000a1U));
+    CHECK_TRUE(GuValidArchChip(0xb96000a1U));
+    puts("Laptop / Mobile GPU (AD106M 0x282010de, GU_IS_MOBILE_GPU=1) validation PASS");
+    return 0;
+}
+""")
+        prof_laptop = work / "prof_laptop"
+        prof_laptop.mkdir()
+        (prof_laptop / "local_profile.h").write_text("""#pragma once
+#define GU_BOARD_ID 0x282010deU
+#define GU_BOARD_SUBSYSTEM 0x1e331043U
+#define GU_BOARD_CHIP 0x196000a1U
+#define GU_ARCH_ADA 1
+#define GU_ARCH_TURING 0
+#define GU_IS_MOBILE_GPU 1
+""")
+        src_laptop = work / "src_laptop"
+        shutil.copytree(src, src_laptop)
+        shutil.copy2(prof_laptop / "local_profile.h", src_laptop / "unlock" / "local_profile.h")
+        probe_laptop_exe = work / "probe_laptop_asan"
+        subprocess.run(
+            ["gcc", f"-I{prof_laptop}", *asan_flags, str(probe_laptop_c), "-o", str(probe_laptop_exe)],
+            cwd=src_laptop,
+            check=True,
+        )
+        r_laptop = subprocess.run([str(probe_laptop_exe)], cwd=src_laptop, capture_output=True, text=True, check=True)
+        print(r_laptop.stdout.strip())
         return 0
 
 

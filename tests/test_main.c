@@ -391,6 +391,33 @@ int main(void)
 	assert(fake.loads == 1 && fake.started == 1 && fake.unlocks[0]);
 	puts("turing: gated exact-card dispatch PASS");
 
+	/* Laptop / Mobile GPU targets: GA10x mobile by all/BDF, Ada & Turing mobile gated by family flag. */
+	reset("all");
+	add("0000:01:00.0", 0x249c, false); /* RTX 3080 Laptop GPU (GA104M) */
+	add("0000:02:00.0", 0x2520, false); /* RTX 3060 Laptop GPU (GA106M) */
+	fake.expected_concurrent = 2;
+	run();
+	assert(fake.loads == 1 && fake.started == 2 && fake.unlocks[0] && fake.unlocks[1]);
+	reset("0000:01:00.0");
+	ad103_experimental = true;
+	add("0000:01:00.0", 0x2717, false); /* RTX 4090 Laptop GPU (AD103M) */
+	fake.expected_concurrent = 1;
+	run();
+	assert(fake.loads == 1 && fake.started == 1 && fake.unlocks[0]);
+	reset("0000:01:00.0");
+	ada_experimental = true;
+	add("0000:01:00.0", 0x2820, false); /* RTX 4070 Laptop GPU (AD106M) */
+	fake.expected_concurrent = 1;
+	run();
+	assert(fake.loads == 1 && fake.started == 1 && fake.unlocks[0]);
+	reset("0000:01:00.0");
+	turing_experimental = true;
+	add("0000:01:00.0", 0x1e90, false); /* RTX 2080 Mobile (TU104M) */
+	fake.expected_concurrent = 1;
+	run();
+	assert(fake.loads == 1 && fake.started == 1 && fake.unlocks[0]);
+	puts("laptop/mobile: GA10xM, AD10xM, TU10xM dispatch PASS");
+
 	/* No opt-in on the command line: the module does nothing. */
 	for (int empty = 0; empty < 2; empty++) {
 		reset(empty ? "" : NULL);

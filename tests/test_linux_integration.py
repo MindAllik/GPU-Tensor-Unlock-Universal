@@ -601,7 +601,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
         3. Version is 1.2.9 across README.md, core_detector.py, and UEFI headers.
         """
         import struct, tempfile
-        self.assertEqual(core_detector.get_app_version(), "1.2.9")
+        self.assertEqual(core_detector.get_app_version(), "1.3.0")
         shstrtab = b"\x00.shstrtab\x00.fwimage\x00.fwsignature_tu10x\x00"
         while len(shstrtab) % 8 != 0:
             shstrtab += b"\x00"
@@ -638,5 +638,107 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
             elf_p.unlink(missing_ok=True)
 
 
+    def test_turing_v2_ns_hs_split_pio_and_wpr2_geometry(self) -> None:
+        """Verify Turing V2 NS+HS split IMEM loading (SEC=0 for NS, SEC=1 for HS),
+        Portal PIO helpers, 1 MiB WPR2 top alignment, Turing heap sizing, and
+        UCODE_IMAGE_DBG[:0x6000] extraction."""
+        for rel in ("windows/uefi/source/unlock/vendor/unlock_610.c", "kernel/gpu_unlock/unlock_610.c"):
+            src = (ROOT / rel).read_text(encoding="utf-8")
+            self.assertIn("falcon_pio_imem", src)
+            self.assertIn("falcon_pio_dmem", src)
+            self.assertIn("gpu_unlock_dma_cmd(false) | 0x10u", src)
+            self.assertIn("fwsec_ns_size", src)
+            self.assertIn("post-unlock Turing SEC2 reset released, FLR skipped", src)
+            self.assertNotIn("if ((hi >> 4) || ss0 != GU_SS0_UNLOCK", src)
+        cd_src = (ROOT / "core_detector.py").read_text(encoding="utf-8")
+        self.assertIn("BINDATA_LABEL_UCODE_IMAGE_DBG_data[]", cd_src)
+
+
+    def test_v130_laptop_mobile_gpu_and_rtd3_support(self) -> None:
+        """Verify v1.3.0 Laptop / Mobile GPU support across Ada (AD103M..AD107M),
+        Ampere (GA103M..GA107M), and Turing (TU104M..TU106M), 3D controller [0302]
+        detection, GU_IS_MOBILE_GPU profile generation, and Linux RTD3 detection."""
+        import tempfile
+
+        # 1. Verify mobile GPUs across all 3 architectures are supported and flagged is_mobile=True
+        for dev16, name, sm, exp_die, exp_opt_Frag in (
+            (0x2717, "NVIDIA GeForce RTX 4090 Laptop GPU", "sm_89", "AD103", "ad103_experimental=1"),
+            (0x27A0, "NVIDIA GeForce RTX 4080 Laptop GPU", "sm_89", "AD104", "ad104_experimental=1"),
+            (0x2820, "NVIDIA GeForce RTX 4070 Laptop GPU", "sm_89", "AD106", "ada_experimental=1"),
+            (0x28A0, "NVIDIA GeForce RTX 4060 Laptop GPU", "sm_89", "AD107", "ada_experimental=1"),
+            (0x28A1, "NVIDIA GeForce RTX 4050 Laptop GPU", "sm_89", "AD107", "ada_experimental=1"),
+            (0x2420, "NVIDIA GeForce RTX 3080 Ti Laptop GPU", "sm_86", "GA103", ""),
+            (0x249D, "NVIDIA GeForce RTX 3070 Laptop GPU", "sm_86", "GA104", ""),
+            (0x2520, "NVIDIA GeForce RTX 3060 Laptop GPU", "sm_86", "GA106", ""),
+            (0x25A0, "NVIDIA GeForce RTX 3050 Ti Laptop GPU", "sm_86", "GA107", ""),
+            (0x1E90, "NVIDIA GeForce RTX 2080 Mobile", "sm_75", "TU104", "turing_experimental=1"),
+            (0x1F11, "NVIDIA GeForce RTX 2060 Mobile", "sm_75", "TU106", "turing_experimental=1"),
+            (0x1F12, "NVIDIA GeForce RTX 2060 Max-Q", "sm_75", "TU106", "turing_experimental=1"),
+        ):
+            cls = core_detector.classify_pci_device(dev16, name, sm)
+            self.assertTrue(cls["supported"], f"Mobile GPU 0x{dev16:04x} ({name}) should be supported")
+            self.assertTrue(cls["is_mobile"], f"Mobile GPU 0x{dev16:04x} ({name}) should have is_mobile=True")
+            self.assertEqual(cls["die_name"], exp_die)
+            boot_opt = core_detector.get_linux_boot_option_for_gpu({
+                "pci_bdf": "0000:01:00.0",
+                "board_id_hex": f"0x{dev16:04x}10de",
+                "gpu_name": name,
+            })
+            self.assertIn("gpu_unlock.targets=0000:01:00.0", boot_opt)
+            if exp_opt_Frag:
+                self.assertIn(exp_opt_Frag, boot_opt)
+
+        # 2. Verify validate_target_profile sets is_mobile=True for Laptop GPUs
+        prof_4090m = core_detector.validate_target_profile({
+            "gpu_name": "NVIDIA GeForce RTX 4090 Laptop GPU",
+            "die_name": "AD103",
+            "chip_id_hex": "0x193000a1",
+            "board_id_hex": "0x271710de",
+            "subsystem_id_hex": "0x15ef1043",
+            "segment_hex": "0x0",
+            "bus_hex": "0x01",
+            "device_hex": "0x0",
+            "function_hex": "0x0",
+            "vram_min_hex": "0x3bf0",
+            "vram_max_hex": "0x4400",
+            "esp_guid": "AUTO",
+            "esp_part_num": 0,
+        })
+        self.assertTrue(prof_4090m["is_mobile"])
+
+        # 3. Verify 3D controller [0302] MUXless laptop detection in sysfs + lspci
+        with tempfile.TemporaryDirectory() as tmpd:
+            sysfs = Path(tmpd)
+            d0 = sysfs / "0000:01:00.0"
+            d0.mkdir()
+            (d0 / "vendor").write_text("0x10de\n", encoding="ascii")
+            (d0 / "device").write_text("0x2820\n", encoding="ascii")
+            (d0 / "subsystem_vendor").write_text("0x1043\n", encoding="ascii")
+            (d0 / "subsystem_device").write_text("0x1e33\n", encoding="ascii")
+            (d0 / "class").write_text("0x030200\n", encoding="ascii")  # 3D controller (MUXless Optimus)
+            lspci_3d = "0000:01:00.0 3D controller [0302]: NVIDIA Corporation AD106M [GeForce RTX 4070 Max-Q / Mobile] [10de:2820] (rev a1)\n"
+            gpus = core_detector._query_linux_pci_gpus(sysfs_root=sysfs, lspci_output=lspci_3d)
+            self.assertEqual(len(gpus), 1)
+            self.assertEqual(gpus[0]["dev16"], 0x2820)
+
+            # 4. Verify Linux RTD3 state inspection
+            p_params = Path(tmpd) / "params"
+            p_etc = Path(tmpd) / "etc-nvidia-runtimepm.conf"
+            p_usr = Path(tmpd) / "usr-nvidia-runtimepm.conf"
+            p_params.write_text("DynamicPowerManagement: 2\n", encoding="utf-8")
+            p_usr.write_text("options nvidia NVreg_DynamicPowerManagement=0x02\n", encoding="utf-8")
+            rtd3 = linux_backend.check_linux_nvidia_rtd3_state(p_params, p_etc, p_usr)
+            self.assertTrue(rtd3["rtd3_active"])
+            self.assertEqual(rtd3["dynamic_pm_value"], 2)
+            self.assertFalse(rtd3["etc_disabled_override"])
+
+            p_params.write_text("DynamicPowerManagement: 0\n", encoding="utf-8")
+            p_etc.write_text("options nvidia NVreg_DynamicPowerManagement=0x00\n", encoding="utf-8")
+            rtd3_off = linux_backend.check_linux_nvidia_rtd3_state(p_params, p_etc, p_usr)
+            self.assertFalse(rtd3_off["rtd3_active"])
+            self.assertTrue(rtd3_off["etc_disabled_override"])
+
+
 if __name__ == "__main__":
+
     unittest.main()

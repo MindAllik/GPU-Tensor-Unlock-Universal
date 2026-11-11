@@ -22,13 +22,13 @@ MODULE_PARM_DESC(ad104_experimental, "permit only the exact AD104 target with a 
 
 static bool ada_experimental;
 module_param(ada_experimental, bool, 0444);
-MODULE_PARM_DESC(ada_experimental, "permit experimental desktop AD102/AD106/AD107 targets with a single explicit PCI address");
+MODULE_PARM_DESC(ada_experimental, "permit experimental desktop/mobile AD102/AD106/AD107 targets with a single explicit PCI address");
 
 static bool turing_experimental;
 module_param(turing_experimental, bool, 0444);
-MODULE_PARM_DESC(turing_experimental, "permit experimental desktop TU102/TU104/TU106 RTX 20-series targets with a single explicit PCI address");
+MODULE_PARM_DESC(turing_experimental, "permit experimental desktop/mobile TU102/TU104/TU106 RTX 20-series targets with a single explicit PCI address");
 
-/* RTX 4090 and supported desktop GA102/GA103/GA104/GA106/GA107 GPU functions.
+/* RTX 4090 and supported desktop & laptop GA102/GA103/GA104/GA106/GA107 GPU functions.
  * Professional parts already have full FP32-accumulate tensor issue rate.
  */
 static const unsigned short supported_ids[] = {
@@ -37,18 +37,19 @@ static const unsigned short supported_ids[] = {
 	/* GA102 */
 	0x2200, 0x2203, 0x2204, 0x2205, 0x2206, 0x2207, 0x2208, 0x220a,
 	0x220d, 0x2216, 0x222b, 0x222f,
-	/* GA104 */
+	/* GA104 desktop & laptop (RTX 3080/3070 Ti/3070 Laptop GPU) */
 	0x2480, 0x2482, 0x2483, 0x2484, 0x2486, 0x2487, 0x2488, 0x2489,
 	0x248a, 0x248c, 0x248d, 0x248e, 0x249c, 0x249d, 0x249f, 0x24a0,
 	0x24a4, 0x24ac, 0x24ad, 0x24af, 0x24bf, 0x24c0, 0x24c7, 0x24c8,
 	0x24c9, 0x24dc, 0x24dd, 0x24df, 0x24e0,
-	/* GA103 (untested) */
-	0x2414,
-	/* GA106 (validated only on RTX 3060 12GB 0x2504) */
-	0x2501, 0x2503, 0x2504, 0x2505, 0x2507, 0x2508, 0x2509, 0x252f,
-	0x2544,
-	/* GA107 (desktop RTX 3050 8GB/6GB) */
-	0x2582, 0x2583, 0x2584,
+	/* GA103 desktop & laptop (RTX 3080 Ti Laptop GPU) */
+	0x2414, 0x2420, 0x2460,
+	/* GA106 desktop & laptop (RTX 3060 / 3050 Ti Laptop GPU) */
+	0x2501, 0x2503, 0x2504, 0x2505, 0x2507, 0x2508, 0x2509, 0x2520,
+	0x2523, 0x252f, 0x2544, 0x2560, 0x2563,
+	/* GA107 desktop & laptop (RTX 3050 Ti / 3050 / 2050 Laptop GPU) */
+	0x2582, 0x2583, 0x2584, 0x25a0, 0x25a2, 0x25a5, 0x25a6, 0x25a9,
+	0x25ab, 0x25ac, 0x25ad, 0x25e0, 0x25e2, 0x25e5,
 };
 
 static ASYNC_DOMAIN_EXCLUSIVE(unlock_domain);
@@ -191,4 +192,4 @@ static void __exit gpu_unlock_exit(void)
 module_init(gpu_unlock_init);
 module_exit(gpu_unlock_exit);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("RTX 4090, experimental RTX 40/20-series and supported GA10x pre-driver tensor unlock");
+MODULE_DESCRIPTION("RTX 4090, experimental RTX 40/20-series and supported GA10x desktop & laptop pre-driver tensor unlock");

@@ -130,7 +130,11 @@ def extract_assets(source_root: Path, output: Path, chip: str = "ga102") -> None
             inputs[name] = path.read_bytes().decode('ascii')
         booter = build_bundle(inputs['g_bindata_kgspGetBinArchiveBooterLoadUcode_TU102.c'])
         boot = inputs['g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c']
-        image = _array_bytes(boot, 'UCODE_IMAGE_PROD')[0]
+        if 'BINDATA_LABEL_UCODE_IMAGE_DBG_data[]' in boot:
+            dbg_image = _array_bytes(boot, 'UCODE_IMAGE_DBG')[0]
+            image = dbg_image[:0x6000] if len(dbg_image) >= 0x6000 else dbg_image
+        else:
+            image = _array_bytes(boot, 'UCODE_IMAGE_PROD')[0]
         desc = _array_bytes(boot, 'UCODE_DESC_PROD')[0]
         blobs = {
             'booter_load_tu102.bin': booter,

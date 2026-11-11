@@ -1,6 +1,6 @@
 # GPU-Tensor-Unlock-Universal
 
-**Version: 1.2.9**
+**Version: 1.3.0**
 
 **Pre-driver `FMLA32` Tensor Core unlocker and PTX benchmark console for GeForce RTX 40-series (Ada Lovelace), RTX 30-series (Ampere), and RTX 20-series (Turing) on Windows 10/11 (UEFI USB) and Linux (`gpu_unlock.ko`).**
 
@@ -89,6 +89,7 @@ Upstream research repositories proved that the V67 SEC2 Booter chain works on Tu
 | **Ada (`AD102/103/104/106/107`)** | `0x192..0x197` | **Experimental Opt-In (Simulated)** | GeForce RTX 4090 D (`2685`), 4080 SUPER (`2702`), 4080 (`2704`), 4070 SUPER (`2783`), 4070 (`2786`/`2709`), 4060 Ti (`2803`/`2805`/`27b0`), 4060 (`2882`) | `targets=<BDF>` + family flag (`ad103_experimental=1`, `ad104_experimental=1`, or `ada_experimental=1`) |
 | **Ampere (`GA102/103/104/106/107`)** | `0x172..0x177` (incl. `0xb72..0xb77` 8N strap) | **Experimental Opt-In (Simulated)** | GeForce RTX 3090 Ti (`2203`), 3080 Ti 12GB/20GB (`2208`/`2205`), 3080 12GB/LHR (`220a`/`2216`), 3070 Ti (`2482`/`2207`), 3070 (`2484`/`2488`), 3060 Ti (`2486`/`2489`/`24c9`/`2414`), 3060 (`2503`/`2487`), 3050 (`2507`/`2582`/`2584`), CMP 90HX/70HX (`220d`/`248a`) | `modprobe gpu_unlock targets=<BDF>` (or `all`) |
 | **Turing (`TU102/104/106`)** | `0x162/164/166` | **Experimental Opt-In (Simulated)** | GeForce RTX 2080 Ti (`1e04`/`1e07`), TITAN RTX (`1e02`), 2080 SUPER (`1e81`), 2080 (`1e82`/`1e87`), 2070 SUPER (`1e84`), 2070 (`1f02`/`1f07`), 2060 SUPER (`1f06`/`1f47`), 2060 12GB (`1f03`), 2060 6GB (`1f08`), CMP 50HX (`1e09`), CMP 40HX (`1f0b`) | `modprobe gpu_unlock targets=<BDF> turing_experimental=1` \* |
+| **Laptop / Mobile (`AD103M..107M`, `GA103M..107M`, `TU104M..106M`)** | `0x193..197` / `0x173..177` / `0x164..166` | **Experimental Opt-In (Simulated)** | RTX 4090/4080/4070/4060/4050 Laptop (`2717`/`2757`/`27a0`/`27e0`/`2820`/`2860`/`28a0`/`28a1`/`28e0`/`28e1`), RTX 3080 Ti/3080/3070 Ti/3070/3060/3050 Ti/3050/2050 Laptop (`2420`/`2460`/`249c`/`249d`/`24a0`/`24dc`/`24dd`/`24e0`/`2520`/`2523`/`2560`/`2563`/`25a0`..`25e5`), RTX 2080S/2080/2070S/2070/2060 Mobile & Max-Q (`1e90`..`1ed3`/`1f10`..`1f55`) | `targets=<BDF>` (+ family flag on Ada/Turing) + `NVreg_DynamicPowerManagement=0x00` |
 
 *\* Note on Linux module flags: Hardware-validated `RTX 4070 Ti` (`10de:2782`), `RTX 4070 Ti SUPER` (`10de:2705`), and experimental Turing (`TU102`/`TU104`/`TU106`) targets intentionally retain a mandatory single-BDF requirement and their family opt-in module parameters (`ad104_experimental=1`, `ad103_experimental=1`, `turing_experimental=1`) in `gpu_unlock.ko` so that a wildcard `targets=all` setting on a multi-GPU machine cannot accidentally capture an Ada or Turing card without explicit per-device opt-in.*
 

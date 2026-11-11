@@ -164,6 +164,7 @@ struct unlock_transaction_work {
 	void *fwsec_cpu;
 	dma_addr_t fwsec_dma;
 	u32 fwsec_size;
+	u32 fwsec_ns_size;
 	u32 last_offset, last_value;
 	bool last_valid;
 	u32 last_pci_offset, last_pci_value;
@@ -443,6 +444,9 @@ static int falcon_reset(struct unlock_transaction_work *work, const struct falco
 	ret = poll_us(work, eng->base + 0xf4, 1u << 12, 0, 1000000, true);
 	if (ret)
 		return GU_RESULT(ret);
+	ret = poll_us(work, eng->base + 0x10c, 6u, 0, 1000000, true);
+	if (ret)
+		return GU_RESULT(ret);
 	if (read_bar(work, eng->base + 0xf4, &hwcfg) || inaccessible(hwcfg))
 		return GU_RESULT(-EIO);
 	if (hwcfg & (1u << 10)) {
@@ -579,6 +583,40 @@ static void log_falcon_failure(struct unlock_transaction_work *work,
 	log_falcon_state(work, "gsp", &gu_gsp);
 }
 
+static u32 le32_word(const u8 *p)
+{
+	return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
+}
+
+static int falcon_pio_dmem(struct unlock_transaction_work *work, u32 base,
+			   u32 dest, const u8 *src, u32 bytes)
+{
+	u32 i;
+
+	if (!src || (dest & 3u) || (bytes & 3u))
+		return GU_RESULT(-EINVAL);
+	write_bar(work, base + 0x1c0, dest | (1u << 24));
+	for (i = 0; i < bytes; i += 4)
+		write_bar(work, base + 0x1c4, le32_word(src + i));
+	return 0;
+}
+
+static int falcon_pio_imem(struct unlock_transaction_work *work, u32 base,
+			   u32 dest, const u8 *src, u32 bytes, u32 tag, bool secure)
+{
+	u32 i;
+
+	if (!src || (dest & 255u) || (bytes & 3u) || (tag & 255u))
+		return GU_RESULT(-EINVAL);
+	write_bar(work, base + 0x180, dest | (1u << 24) | (secure ? (1u << 28) : 0u));
+	for (i = 0; i < bytes; i += 4) {
+		if (!(i & 255u))
+			write_bar(work, base + 0x188, (tag + i) >> 8);
+		write_bar(work, base + 0x184, le32_word(src + i));
+	}
+	return 0;
+}
+
 static int falcon_hs(struct unlock_transaction_work *work, const struct falcon_eng *eng,
 		     u32 code_off, u32 code_size, u32 code_va, u32 code_pa,
 		     u32 data_off, u32 data_size, u32 data_pa,
@@ -587,6 +625,10 @@ static int falcon_hs(struct unlock_transaction_work *work, const struct falcon_e
 		     bool wait_plm)
 {
 	u32 trans, cpuctl;
+	u32 ns_size = (eng->base == SEC2_BASE)
+		? (is_tu102(work) ? work->booter_hdr.os_code_size : 0u)
+		: work->fwsec_ns_size;
+	u32 boot_vec = code_va;
 	dma_addr_t code_src;
 	int ret;
 
@@ -616,28 +658,82 @@ static int falcon_hs(struct unlock_transaction_work *work, const struct falcon_e
 		return GU_RESULT(-ENODEV);
 	trans = (trans & ~7u) | 5u;
 	write_bar(work, eng->fbif, trans);
-	dma_wmb();
-	ret = falcon_dma(work, eng->base, code_pa, code_va, code_src,
-			 code_size, gpu_unlock_dma_cmd(true));
-	if (ret)
-		return GU_RESULT(ret);
-	if (data_size) {
-		ret = falcon_dma(work, eng->base, data_pa, 0, image + data_off, data_size,
-				 gpu_unlock_dma_cmd(false));
+	if (ns_size > 0) {
+		u32 trans4 = 0;
+		u32 sec_off = (eng->base == SEC2_BASE) ? code_off : ns_size;
+		u32 sec_size = (eng->base == SEC2_BASE) ? code_size : (code_size - ns_size);
+		const u8 *cpu_buf = (eng->base == SEC2_BASE)
+			? (const u8 *)work->booter_cpu : (const u8 *)work->fwsec_cpu;
+		u32 imem0 = ~0u, dmem0 = ~0u;
+
+		boot_vec = (eng->base == SEC2_BASE) ? work->booter_hdr.os_code_off : code_va;
+		if (!read_bar(work, eng->fbif + 0x10, &trans4) && !inaccessible(trans4))
+			write_bar(work, eng->fbif + 0x10, (trans4 & ~0x1fu) | 0x15u);
+		dma_wmb();
+		ret = falcon_dma(work, eng->base, code_pa, boot_vec, image,
+				 ns_size, gpu_unlock_dma_cmd(false) | 0x10u);
 		if (ret)
 			return GU_RESULT(ret);
+		ret = falcon_dma(work, eng->base, code_pa + sec_off, boot_vec + sec_off, image,
+				 sec_size, gpu_unlock_dma_cmd(true));
+		if (ret)
+			return GU_RESULT(ret);
+		if (data_size) {
+			ret = falcon_dma(work, eng->base, data_pa, 0, image + data_off, data_size,
+					 gpu_unlock_dma_cmd(false));
+			if (ret)
+				return GU_RESULT(ret);
+		}
+		if (cpu_buf) {
+			ret = falcon_pio_imem(work, eng->base, code_pa, cpu_buf,
+					      ns_size, boot_vec, false);
+			if (ret)
+				return GU_RESULT(ret);
+			ret = falcon_pio_imem(work, eng->base, code_pa + sec_off,
+					      cpu_buf + sec_off, sec_size,
+					      boot_vec + sec_off, true);
+			if (ret)
+				return GU_RESULT(ret);
+			if (data_size) {
+				ret = falcon_pio_dmem(work, eng->base, data_pa,
+						      cpu_buf + data_off, (data_size + 3u) & ~3u);
+				if (ret)
+					return GU_RESULT(ret);
+			}
+			write_bar(work, eng->base + 0x180, code_pa);
+			(void)read_bar(work, eng->base + 0x184, &imem0);
+			write_bar(work, eng->base + 0x1c0, data_pa + sig_dmem);
+			(void)read_bar(work, eng->base + 0x1c4, &dmem0);
+			dev_info(&work->pdev->dev,
+				 "Falcon V2 PIO stage: base=%#x ns=%#x sec=%#x:%#x imem0=%#x(match=%u) dmem_sig=%#x(match=%u)\n",
+				 eng->base, ns_size, sec_off, sec_size, imem0,
+				 imem0 == le32_word(cpu_buf), dmem0,
+				 data_size >= sig_dmem + 4 ? (dmem0 == le32_word(cpu_buf + data_off + sig_dmem)) : 1u);
+		}
+	} else {
+		dma_wmb();
+		ret = falcon_dma(work, eng->base, code_pa, code_va, code_src,
+				 code_size, gpu_unlock_dma_cmd(true));
+		if (ret)
+			return GU_RESULT(ret);
+		if (data_size) {
+			ret = falcon_dma(work, eng->base, data_pa, 0, image + data_off, data_size,
+					 gpu_unlock_dma_cmd(false));
+			if (ret)
+				return GU_RESULT(ret);
+		}
+		write_bar(work, eng->falcon2 + 0x210, sig_dmem);
+		write_bar(work, eng->falcon2 + 0x19c, engine_mask);
+		write_bar(work, eng->falcon2 + 0x198, ucode_id & 0xff);
+		write_bar(work, eng->falcon2 + 0x180, 1);
 	}
-	write_bar(work, eng->falcon2 + 0x210, sig_dmem);
-	write_bar(work, eng->falcon2 + 0x19c, engine_mask);
-	write_bar(work, eng->falcon2 + 0x198, ucode_id & 0xff);
-	write_bar(work, eng->falcon2 + 0x180, 1);
-	write_bar(work, eng->base + 0x104, code_va);
+	write_bar(work, eng->base + 0x104, boot_vec);
 	write_bar(work, eng->base + 0x40, mailbox0);
 	write_bar(work, eng->base + 0x44, mailbox1);
 	if (read_bar(work, eng->base + 0x100, &cpuctl) || inaccessible(cpuctl))
 		return GU_RESULT(-EIO);
 	dev_info(&work->pdev->dev, "Falcon start: base=%#x cpuctl=%#x code_va=%#x sig_dmem=%#x engine_mask=%#x ucode=%u mailbox=%#x:%#x\n",
-		eng->base, cpuctl, code_va, sig_dmem, engine_mask, ucode_id, mailbox1, mailbox0);
+		eng->base, cpuctl, boot_vec, sig_dmem, engine_mask, ucode_id, mailbox1, mailbox0);
 	if (eng->base == SEC2_BASE) {
 		work->sec2_started = true;
 		work->sec2_halt_verified = false;
@@ -944,7 +1040,7 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 	if (vga & (1u << 3)) {
 		in->vga_base = (u64)(vga >> 8) << 16;
 		if (in->vga_base < in->usable_fb - (1ull << 20))
-			in->vga_base = in->usable_fb - 0x20000;
+			in->vga_base = in->usable_fb - (is_tu102(work) ? (1ull << 20) : 0x20000ull);
 	}
 	if (in->vga_base >= in->usable_fb) {
 		dev_err(&work->pdev->dev, "layout rejected: VGA base at or above usable FB\n");
@@ -978,8 +1074,15 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 	in->boot_size = work->boot_desc.image_size;
 	in->image_size = work->image_span.size;
 	in->nonwpr_size = 1ull << 20;
-	/* GA102's supported minimum heap; no GSP-RM clients are started here. */
-	in->heap_request = 88ull << 20;
+	if (is_tu102(work)) {
+		u64 gb = (in->usable_fb + (1ull << 30) - 1ull) >> 30;
+		u64 per_gb_mb = (gb * 96ull + 1023ull) / 1024ull;
+
+		in->heap_request = (8ull + 96ull + per_gb_mb) << 20;
+	} else {
+		/* GA102's supported minimum heap; no GSP-RM clients are started here. */
+		in->heap_request = 88ull << 20;
+	}
 	ret = gpu_unlock_layout(in, &work->layout);
 	dev_info(&work->pdev->dev,
 		 "layout decoded: fb=%#llx vga=%#llx mmu_valid=%u mmu_low=%#llx frts=%#llx heap=%#llx result=%d\n",
@@ -1231,6 +1334,15 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 		if (ret)
 			goto out;
 		memcpy((u8 *)image + fw.data_off + fw.pkc_off, rom + fw.sig_off + sig_at, 384);
+		work->fwsec_ns_size = 0;
+	} else {
+		work->fwsec_ns_size = (fw.imem_sec_base > fw.imem_va &&
+				       fw.imem_sec_base - fw.imem_va < fw.imem_size &&
+				       !((fw.imem_sec_base - fw.imem_va) & 255u))
+			? (fw.imem_sec_base - fw.imem_va) : 0x400u;
+		dev_info(&work->pdev->dev,
+			 "FWSEC V2: split NS=%#x HS=%#x embedded AES-128 signature (no RSA-3k PKC patch required)\n",
+			 work->fwsec_ns_size, fw.imem_size - work->fwsec_ns_size);
 	}
 	pci_set_master(work->pdev);
 	work->master = true;
@@ -1278,6 +1390,8 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 	    ((u64)(wpr_hi >> 4) << 12) >= work->layout.wpr_end ||
 	    (wpr_lo >> 4) != (u32)(frts >> 12))
 		ret = -EIO;
+	if (!ret && is_tu102(work))
+		ret = falcon_reset(work, &gu_gsp);
 out:
 	/* Ownership transfers to work before publication, including failure paths. */
 	kvfree(rom);
@@ -1360,8 +1474,11 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 			h->patch_loc - h->os_data_off, h->engine_id, h->ucode_id,
 			work->booter_dma, lower_32_bits(work->meta_dma),
 			upper_32_bits(work->meta_dma), true);
-	if (!is_ad102(work))
+	if (!is_ad102(work)) {
+		if (!ret && is_tu102(work))
+			(void)poll_us(work, SEC2_BASE + 0x100, 0x10, 0x10, 5000000, false);
 		return GU_RESULT(ret);
+	}
 	/* The marker precedes the cleanup tail. Wait for its exit before changing
 	 * firmware-visible metadata or applying selectors; a live SEC2 retains DMA. */
 	halt_ret = ret ? ret : poll_us(work, SEC2_BASE + 0x100, 0x10, 0x10, 5000000, true);
@@ -1546,6 +1663,9 @@ static int hold_sec2_reset(struct unlock_transaction_work *work, const char *pha
 	ret = poll_us(work, SEC2_BASE + 0xf4, 1u << 12, 0, 1000000, true);
 	if (ret)
 		return GU_RESULT(ret);
+	ret = poll_us(work, SEC2_BASE + 0x10c, 6u, 0, 1000000, true);
+	if (ret)
+		return GU_RESULT(ret);
 	if (read_bar(work, SEC2_BASE + 0xf4, &hwcfg) || inaccessible(hwcfg))
 		return GU_RESULT(-EIO);
 	dev_info(&work->pdev->dev, "engine reset released: phase=%s base=%#x engine=%#x hwcfg2=%#x\n",
@@ -1663,19 +1783,22 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 	if (ret)
 		return GU_RESULT(ret);
 	if (is_tu102(work)) {
-		write_bar(work, 0x001fa828, 0);
-		write_bar(work, 0x001fa824, 0);
 		write_bar(work, feat_plm_offset(work), 0xffffffefu);
 		ret = hold_sec2_reset(work, "post-unlock-turing");
 		if (ret)
 			return GU_RESULT(ret);
+		write_bar(work, SEC2_BASE + 0x40, 0);
+		write_bar(work, SEC2_BASE + 0x44, 0);
 		if (read_bar(work, 0x001fa824, &lo) || inaccessible(lo) ||
 		    read_bar(work, 0x001fa828, &hi) || inaccessible(hi) ||
 		    read_bar(work, feat_ss0_offset(work), &ss0) || inaccessible(ss0) ||
 		    read_bar(work, feat_ss1_offset(work), &ss1) || inaccessible(ss1) ||
 		    read_bar(work, feat_plm_offset(work), &plm) || (plm & 0xffff0000u) == 0xbadf0000u)
 			return GU_RESULT(-ENODEV);
-		if ((hi >> 4) || ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK)
+		dev_info(&work->pdev->dev,
+			 "post-unlock Turing SEC2 reset released, FLR skipped, WPR2=%08x:%08x PLM=%#x SS0=%08x SS1=%08x\n",
+			 lo, hi, plm, ss0, ss1);
+		if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK)
 			return GU_RESULT(-EIO);
 		work->quiesced = true;
 		return 0;

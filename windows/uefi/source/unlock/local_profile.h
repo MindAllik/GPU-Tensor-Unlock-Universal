@@ -2,7 +2,7 @@
 /* Hardware & System Profile (populated automatically by the Universal USB Builder UI) */
 #pragma once
 
-#define GU_APP_VERSION "1.2.9"
+#define GU_APP_VERSION "1.3.0"
 #define GU_BOARD_ID 0x278210deU
 #define GU_BOARD_SUBSYSTEM 0xf2941569U
 #define GU_BOARD_CHIP 0x194000a1U
@@ -14,6 +14,7 @@
 #define GU_VRAM_MIN_MIB 0x2ff0U
 #define GU_VRAM_MAX_MIB 0x3000U
 #define GU_ARCH_ADA 1
+#define GU_IS_MOBILE_GPU 0
 #define GU_EXPECTED_COLD_PLM 0xffffff8fU
 #define GU_EXPECTED_POST_FLR_PLM 0xffffffffU
 
