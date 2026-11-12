@@ -542,19 +542,21 @@ static int falcon_hs(struct unlock_transaction_work *work, const struct falcon_e
 		if (!read_bar(work, eng->fbif + 0x10, &trans4) && !inaccessible(trans4))
 			write_bar(work, eng->fbif + 0x10, (trans4 & ~0x1fu) | 0x15u);
 		dma_wmb();
-		ret = falcon_dma(work, eng->base, code_pa, boot_vec, image,
-				 ns_size, gpu_unlock_dma_cmd(false) | 0x10u);
-		if (ret)
-			return GU_RESULT(ret);
-		ret = falcon_dma(work, eng->base, code_pa + sec_off, boot_vec + sec_off, image,
-				 sec_size, gpu_unlock_dma_cmd(true));
-		if (ret)
-			return GU_RESULT(ret);
-		if (data_size) {
-			ret = falcon_dma(work, eng->base, data_pa, 0, image + data_off, data_size,
-					 gpu_unlock_dma_cmd(false));
+		if (!cpu_buf || eng->base != SEC2_BASE) {
+			ret = falcon_dma(work, eng->base, code_pa, boot_vec, image,
+					 ns_size, gpu_unlock_dma_cmd(false) | 0x10u);
 			if (ret)
 				return GU_RESULT(ret);
+			ret = falcon_dma(work, eng->base, code_pa + sec_off, boot_vec + sec_off, image,
+					 sec_size, gpu_unlock_dma_cmd(true));
+			if (ret)
+				return GU_RESULT(ret);
+			if (data_size) {
+				ret = falcon_dma(work, eng->base, data_pa, 0, image + data_off, data_size,
+						 gpu_unlock_dma_cmd(false));
+				if (ret)
+					return GU_RESULT(ret);
+			}
 		}
 		if (cpu_buf) {
 			ret = falcon_pio_imem(work, eng->base, code_pa, cpu_buf,
@@ -1303,8 +1305,13 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 	    ((u64)(wpr_hi >> 4) << 12) >= work->layout.wpr_end ||
 	    (wpr_lo >> 4) != (u32)(frts >> 12))
 		ret = -EIO;
-	if (!ret && GU_ARCH_TURING)
+	if (!ret && GU_ARCH_TURING) {
 		ret = falcon_reset(work, &gsp);
+		if (!ret) {
+			write_bar(work, gsp.base + 0x40, 0);
+			write_bar(work, gsp.base + 0x44, 0);
+		}
+	}
 out:
 	/* Ownership transfers to work before publication, including failure paths. */
 	kvfree(rom);

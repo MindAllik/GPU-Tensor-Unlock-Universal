@@ -72,10 +72,24 @@ static BOOLEAN DisplayCheck(VOID) {
     }
     physical++;
     status=Gu.bs->HandleProtocol(handles[i],&PathGuid,(VOID **)&path);
-    if(EFI_ERROR(status) || !path){GuLog("display substep=path handle=%#zx status=%#llx\n",(size_t)handles[i],(unsigned long long)status);status=EFI_UNSUPPORTED;break;}
+    if(EFI_ERROR(status) || !path){
+      if(g->Mode->FrameBufferBase && g->Mode->FrameBufferSize && g->Mode->Info &&
+         g->Mode->Info->PixelFormat<=PixelBlueGreenRedReserved8BitPerColor){
+        GuLog("display virtual pathless gop skipped: handle=%#zx status=%#llx\n",(size_t)handles[i],(unsigned long long)status);
+        physical--;status=EFI_SUCCESS;continue;
+      }
+      GuLog("display substep=path handle=%#zx status=%#llx\n",(size_t)handles[i],(unsigned long long)status);status=EFI_UNSUPPORTED;break;
+    }
     PathLog("display gop handle",path);
     EFI_HANDLE parent=NULL;status=Gu.bs->LocateDevicePath(&PciGuid,&path,&parent);
-    if(EFI_ERROR(status) || !parent){GuLog("display substep=parent handle=%#zx status=%#llx\n",(size_t)handles[i],(unsigned long long)status);status=EFI_UNSUPPORTED;break;}
+    if(EFI_ERROR(status) || !parent){
+      if(g->Mode->FrameBufferBase && g->Mode->FrameBufferSize && g->Mode->Info &&
+         g->Mode->Info->PixelFormat<=PixelBlueGreenRedReserved8BitPerColor){
+        GuLog("display virtual non-pci gop skipped: handle=%#zx status=%#llx\n",(size_t)handles[i],(unsigned long long)status);
+        physical--;status=EFI_SUCCESS;continue;
+      }
+      GuLog("display substep=parent handle=%#zx status=%#llx\n",(size_t)handles[i],(unsigned long long)status);status=EFI_UNSUPPORTED;break;
+    }
     GuLog("display gop[%zu] parent=%#zx target_handle=%#zx\n",i,(size_t)parent,(size_t)Gu.handle);
     if(parent==Gu.handle)targetGops++;
     if(!g->Mode->Info || g->Mode->SizeOfInfo<sizeof(*g->Mode->Info) ||

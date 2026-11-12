@@ -36,7 +36,7 @@ def get_app_version() -> str:
         m = re.search(r"\*\*Version:\s*([0-9]+\.[0-9]+\.[0-9]+)\*\*", readme.read_text(encoding="utf-8", errors="replace"))
         if m:
             return m.group(1)
-    return "1.3.0"
+    return "1.3.1"
 
 
 APP_VERSION: str = get_app_version()
@@ -298,11 +298,11 @@ ASSET_SPECS_GA = {
 }
 
 ASSET_SPECS_TU = {
-    "booter_load_tu102.bin": (59224, "a5cd2eb6a92f343003eb3da67905318dc24f59f77dc02fb48b6389098fbffdb5"),
+    "booter_load_tu102.bin": (59224, "51507de61777cf46f3703a084cdfa896c21f6bc0c8af8f245bd09b2e9c49bf54"),
     "v67-tu102-610.43.03.bin": (64000, "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024"),
-    "gsp_tu10x.bin": (29352832, "d9d9e0f23ccaa9f82e6879c97a7fb0962a421f7b713ba9ff2169641d34ef47be"),
-    "gsp_boot_tu102.bin": (4096, "b2bdccbb79ad4dd48d85c35b00d9ccdf34625bd323805be3f9045a4a24d09fa5"),
-    "gsp_boot_desc_tu102.bin": (76, "d66ab92e021b08d58045569df6956ef1bc742c57e7b31736b172578df87eb0e8"),
+    "gsp_tu10x.bin": (29352832, "73065619db9ec921d19fc4e519dd04d91a9199b525eaca9b257b89fb8c5ec52c"),
+    "gsp_boot_tu102.bin": (4096, "8765694cd38beaa4e2b8b1b83a31fb7aee6cb9d8b7c6bc7a86e6d931a3a056c2"),
+    "gsp_boot_desc_tu102.bin": (76, "9e7cca2cfdc5ce601b0adba39967850046108df6c2d23fff95578ca3f0ccbe01"),
 }
 
 SOURCE_C_FILES = {
@@ -3787,3 +3787,89 @@ def set_gpu_power_limit(
         )
 
     return {"ok": True, "status": "APPLIED", "gpu_uuid": gpu_uuid.strip(), "target_watts": watts_int, "readback_watts": readback_w}
+
+
+def format_markdown_report(
+    hw_info: dict[str, Any] | None,
+    bench_rows: list[tuple[Any, ...]] | None,
+    log_text: str,
+    platform_mode: str = "windows",
+    bench_banner: str = "",
+) -> str:
+    """Build a structured, GitHub-Issues-ready Markdown diagnostic report combining hardware profile,
+    Tensor Core benchmark results, and execution log / REPORT.TXT / dmesg output."""
+    info = hw_info or {}
+    mode_label = "Windows Pre-Boot UEFI" if platform_mode == "windows" else "Linux Kernel Module (gpu_unlock.ko)"
+    gpu_name = info.get("gpu_name") or "NOT DETECTED"
+    die_name = info.get("die_name") or "UNKNOWN"
+    tier = info.get("support_tier") or "unknown"
+    is_mobile = bool(info.get("is_mobile"))
+    form_factor = "Laptop / Mobile dGPU" if is_mobile else "Desktop GPU"
+    board_id = info.get("board_id_hex") or "N/A"
+    subsys_id = info.get("subsystem_id_hex") or "N/A"
+    pci_bdf = info.get("pci_bdf") or info.get("bus_hex") or "N/A"
+    chip_id = info.get("chip_id_hex") or "N/A"
+    vram_mib = info.get("vram_mib") or 0
+    vram_min = info.get("vram_min_hex") or "N/A"
+    vram_max = info.get("vram_max_hex") or "N/A"
+    vbios_ver = info.get("vbios_version") or "N/A"
+
+    lines = [
+        f"## NVIDIA GPU Tensor Unlock — Diagnostic Report (`v{APP_VERSION}`)",
+        "",
+        "### 1. Hardware & Environment Profile",
+        "| Parameter | Value |",
+        "| :--- | :--- |",
+        f"| **Platform Mode** | {mode_label} |",
+        f"| **GPU Model** | `{gpu_name}` ({form_factor}) |",
+        f"| **Silicon Die / Tier** | `{die_name}` (`{chip_id}`, `{tier}`) |",
+        f"| **PCI ID / Subsystem** | `{board_id}` / `{subsys_id}` |",
+        f"| **PCIe BDF** | `{pci_bdf}` |",
+        f"| **VRAM Volume / Window** | `{vram_mib} MiB` (`[{vram_min}..{vram_max}]`) |",
+        f"| **VBIOS Version** | `{vbios_ver}` |",
+    ]
+    if platform_mode == "windows":
+        esp_guid = info.get("esp_guid") or "AUTO"
+        llvm_ok = bool(info.get("clang_path") and info.get("lld_path"))
+        zst_method = info.get("zst_method") or ("ok" if info.get("zst_ok") else "missing")
+        lines.append(f"| **Windows ESP GUID** | `{esp_guid}` |")
+        lines.append(f"| **Build Toolchain** | LLVM=`{'OK' if llvm_ok else 'MISSING'}`, Zstd=`{zst_method}` |")
+    else:
+        krel = info.get("kernel_release") or "N/A"
+        distro = info.get("distro_pretty") or "N/A"
+        drv = info.get("bound_driver") or "N/A"
+        mod_cmd = info.get("linux_modprobe_cmd") or "N/A"
+        lines.append(f"| **Linux Kernel / Distro** | `{krel}` ({distro}) |")
+        lines.append(f"| **Bound Driver** | `{drv}` |")
+        lines.append(f"| **Module Command** | `{mod_cmd}` |")
+
+    if bench_rows:
+        lines.extend([
+            "",
+            "### 2. Tensor Core Throughput Benchmark",
+        ])
+        if bench_banner:
+            lines.append(f"> **{bench_banner}**")
+            lines.append("")
+        lines.extend([
+            "| Instruction / Precision | Fuse | Before (Stock) | After (Unlocked) | Live Current | Speedup |",
+            "| :--- | :---: | :---: | :---: | :---: | :---: |",
+        ])
+        for row in bench_rows:
+            if len(row) >= 6:
+                lines.append(f"| `{row[0]}` | `{row[1]}` | {row[2]} | {row[3]} | {row[4]} | **{row[5]}** |")
+
+    clean_log = (log_text or "").strip() or "(No log output recorded)"
+    lines.extend([
+        "",
+        "### 3. Execution Log / Report Output",
+        "<details open>",
+        "<summary>Click to expand/collapse full execution log</summary>",
+        "",
+        "```text",
+        clean_log,
+        "```",
+        "</details>",
+        "",
+    ])
+    return "\n".join(lines)

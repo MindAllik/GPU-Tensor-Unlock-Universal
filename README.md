@@ -1,6 +1,6 @@
 # GPU-Tensor-Unlock-Universal
 
-**Version: 1.3.0**
+**Version: 1.3.1**
 
 **Pre-driver `FMLA32` Tensor Core unlocker and PTX benchmark console for GeForce RTX 40-series (Ada Lovelace), RTX 30-series (Ampere), and RTX 20-series (Turing) on Windows 10/11 (UEFI USB) and Linux (`gpu_unlock.ko`).**
 
@@ -23,7 +23,7 @@ Upstream research repositories proved that the V67 SEC2 Booter chain works on Tu
 1. **Native Desktop Consoles for Windows and Linux (`Windows_Launch_UI.bat` & `Linux_Launch_UI.sh`)**
    - **Windows 10 / 11 (`Windows_Launch_UI.bat`)**: Detects the host GPU, USB/SD removable drives, and Windows ESP GUID via zero-Admin Win32 kernel IOCTLs (`IOCTL_STORAGE_QUERY_PROPERTY`, `IOCTL_DISK_GET_DRIVE_LAYOUT_EX`) with `AUTO` UEFI ESP discovery fallback, compiles a board-matched `BOOTX64.EFI`, and stages a bootable FAT32 USB drive with a 30-second manual confirmation prompt (`Press U`).
    - **Linux (`./Linux_Launch_UI.sh`)**: Builds and verifies the pinned `610.43.03` firmware assets, stages `gpu_unlock.ko` via DKMS + early-boot `initramfs` hooks (or executes live `modprobe` for unbound secondary GPUs), parses transaction stages from `dmesg`, and reads hardware SM issue-rate dividers directly through `/dev/nvidiactl` (`ioctl 0x20801230`) without requiring a CUDA context.
-   - **Cross-OS Protection & Multi-Language UI**: Prevents running the Windows launcher on Linux/Wine or the Linux launcher on Windows, and supports instant switching between English (`EN`), Russian (`RU`), Chinese (`ZH`), and Hindi (`HI`).
+   - **Cross-OS Protection, Multi-Language UI & One-Click Markdown Report Export**: Prevents running the Windows launcher on Linux/Wine or the Linux launcher on Windows, supports instant switching between English (`EN`), Russian (`RU`), Chinese (`ZH`), and Hindi (`HI`), and includes a **`COPY MARKDOWN REPORT`** button in Section `[05]` that copies a formatted GitHub Issues diagnostic report (Hardware profile table, Tensor Core benchmark table, and collapsible `<details>` log block) to the clipboard.
 
 2. **Multi-Source Hardware Auto-Detection & Profile Lock**
    - Cross-verifies GPU identity across `NVML` (`nvml.dll` / `libnvidia-ml.so.1`), `CUDA Driver API` (`nvcuda.dll` / `libcuda.so.1`), and OS PCI enumerators (Windows `pci.sys` via `Get-PnpDevice` or Linux `/sys/bus/pci/devices/*` + `lspci -Dnn`).

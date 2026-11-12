@@ -22,25 +22,25 @@ typedef struct {const char *name;CHAR16 *file;UINTN size;const char *hash;} ASSE
 #define GU_TU102_BOOTER_SIZE 59224U
 #endif
 #ifndef GU_TU102_BOOTER_HASH
-#define GU_TU102_BOOTER_HASH "a5cd2eb6a92f343003eb3da67905318dc24f59f77dc02fb48b6389098fbffdb5"
+#define GU_TU102_BOOTER_HASH "51507de61777cf46f3703a084cdfa896c21f6bc0c8af8f245bd09b2e9c49bf54"
 #endif
 #ifndef GU_TU102_GSP_SIZE
 #define GU_TU102_GSP_SIZE 29352832U
 #endif
 #ifndef GU_TU102_GSP_HASH
-#define GU_TU102_GSP_HASH "d9d9e0f23ccaa9f82e6879c97a7fb0962a421f7b713ba9ff2169641d34ef47be"
+#define GU_TU102_GSP_HASH "73065619db9ec921d19fc4e519dd04d91a9199b525eaca9b257b89fb8c5ec52c"
 #endif
 #ifndef GU_TU102_BOOT_SIZE
 #define GU_TU102_BOOT_SIZE 4096U
 #endif
 #ifndef GU_TU102_BOOT_HASH
-#define GU_TU102_BOOT_HASH "b2bdccbb79ad4dd48d85c35b00d9ccdf34625bd323805be3f9045a4a24d09fa5"
+#define GU_TU102_BOOT_HASH "8765694cd38beaa4e2b8b1b83a31fb7aee6cb9d8b7c6bc7a86e6d931a3a056c2"
 #endif
 #ifndef GU_TU102_BOOT_DESC_SIZE
 #define GU_TU102_BOOT_DESC_SIZE 76U
 #endif
 #ifndef GU_TU102_BOOT_DESC_HASH
-#define GU_TU102_BOOT_DESC_HASH "d66ab92e021b08d58045569df6956ef1bc742c57e7b31736b172578df87eb0e8"
+#define GU_TU102_BOOT_DESC_HASH "9e7cca2cfdc5ce601b0adba39967850046108df6c2d23fff95578ca3f0ccbe01"
 #endif
 static const ASSET_SPEC Specs[]={
  {"gpu-unlock/610.43.03/booter_load_tu102.bin",L"ASSETS\\booter_load_tu102.bin",GU_TU102_BOOTER_SIZE,GU_TU102_BOOTER_HASH},

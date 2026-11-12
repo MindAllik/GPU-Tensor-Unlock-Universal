@@ -601,7 +601,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
         3. Version is 1.2.9 across README.md, core_detector.py, and UEFI headers.
         """
         import struct, tempfile
-        self.assertEqual(core_detector.get_app_version(), "1.3.0")
+        self.assertEqual(core_detector.get_app_version(), "1.3.1")
         shstrtab = b"\x00.shstrtab\x00.fwimage\x00.fwsignature_tu10x\x00"
         while len(shstrtab) % 8 != 0:
             shstrtab += b"\x00"
@@ -737,6 +737,63 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
             rtd3_off = linux_backend.check_linux_nvidia_rtd3_state(p_params, p_etc, p_usr)
             self.assertFalse(rtd3_off["rtd3_active"])
             self.assertTrue(rtd3_off["etc_disabled_override"])
+
+
+
+    def test_v131_copy_markdown_report_and_laptop_display_and_turing_desc(self) -> None:
+        """Verify v1.3.1 additions:
+        1. Copy Markdown Report button & localizations (EN/RU/ZH/HI) in both Windows and Linux UIs.
+        2. format_markdown_report() output formatting.
+        3. Laptop InsydeH2O ConSplitterDxe pathless virtual GOP skip in app.c.
+        4. Turing 76-byte RM_RISCV_UCODE_DESC v4 (bIsMonitorEnabled=0) bootloaderOffset/bootloaderParamOffset parsing."""
+        import i18n_strings
+
+        for lang in ("EN", "RU", "ZH", "HI"):
+            for d in (i18n_strings.I18N[lang], i18n_strings.I18N_LINUX[lang]):
+                self.assertIn("btn_copy_md_report", d)
+                self.assertIn("ctx_copy_md", d)
+                self.assertIn("md_copied_log", d)
+                self.assertTrue(len(d["btn_copy_md_report"]) > 0)
+
+        sample_hw = {
+            "gpu_name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+            "die_name": "GA107M",
+            "support_tier": "experimental_simulated",
+            "is_mobile": True,
+            "board_id_hex": "0x25a210de",
+            "subsystem_id_hex": "0x16081025",
+            "pci_bdf": "0000:01:00.0",
+            "chip_id_hex": "0x177000a1",
+            "vram_mib": 4096,
+            "vram_min_hex": "0xc00",
+            "vram_max_hex": "0x1400",
+            "vbios_version": "94.07.3B.00.52",
+            "esp_guid": "{70712320-2136-4e0f-aa26-5a288ab65a77}",
+        }
+        sample_bench = [
+            ("FP16 -> FP32 (FMLA32)", "FMLA32", "25.10 TFLOP/s", "50.20 TFLOP/s", "50.20 TFLOP/s", "2.00x (+100.0%)"),
+        ]
+        md = core_detector.format_markdown_report(
+            sample_hw,
+            sample_bench,
+            "CHECK stage=display status=0\nFINAL status=0 stage=complete attempted=1",
+            platform_mode="windows",
+            bench_banner="RTX 3050 Laptop GPU // MEASURED_UNLOCKED [Ratio: 1.00]",
+        )
+        self.assertIn("## NVIDIA GPU Tensor Unlock — Diagnostic Report (`v1.3.1`)", md)
+        self.assertIn("`NVIDIA GeForce RTX 3050 Laptop GPU` (Laptop / Mobile dGPU)", md)
+        self.assertIn("`0x25a210de` / `0x16081025`", md)
+        self.assertIn("| `FP16 -> FP32 (FMLA32)` | `FMLA32` | 25.10 TFLOP/s | 50.20 TFLOP/s | 50.20 TFLOP/s | **2.00x (+100.0%)** |", md)
+        self.assertIn("<details open>", md)
+        self.assertIn("CHECK stage=display status=0", md)
+
+        for ui_fname in ("gpu_unlock_ui.py", "linux_unlock_ui.py"):
+            ui_src = (ROOT / ui_fname).read_text(encoding="utf-8")
+            self.assertIn("btn_copy_md_report", ui_src)
+            self.assertIn("action_copy_markdown_report", ui_src)
+
+        app_src = (ROOT / "windows/uefi/source/unlock/app.c").read_text(encoding="utf-8")
+        self.assertIn("display virtual pathless gop skipped", app_src)
 
 
 if __name__ == "__main__":

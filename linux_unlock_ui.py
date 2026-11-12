@@ -484,6 +484,25 @@ class LinuxUnlockApp(tk.Tk):
         )
         self.btn_copy_log.pack(side="right")
 
+        self.btn_copy_md_report = tk.Button(
+            console_hdr_bar,
+            text="",
+            command=self.action_copy_markdown_report,
+            bg=BTN_ACCENT,
+            fg="#ffffff",
+            activebackground=BTN_ACTIVE,
+            activeforeground="#ffffff",
+            relief="flat",
+            bd=1,
+            highlightbackground=BORDER_COL,
+            highlightthickness=1,
+            padx=8,
+            pady=2,
+            cursor="hand2",
+            font=("Consolas", 8, "bold"),
+        )
+        self.btn_copy_md_report.pack(side="right", padx=(0, 6))
+
         self.lbl_drag_hint = tk.Label(console_hdr_bar, text="", bg=BG_PANEL, fg=FG_MUTED, font=("Consolas", 8), anchor="e")
         self.lbl_drag_hint.pack(side="right", padx=(8, 10))
 
@@ -552,10 +571,12 @@ class LinuxUnlockApp(tk.Tk):
         self.hdr_console.configure(text=t["sec_console"])
         self.lbl_drag_hint.configure(text=t["drag_console_hint"])
         self.btn_copy_log.configure(text=t["btn_copy_log"])
+        self.btn_copy_md_report.configure(text=t["btn_copy_md_report"])
 
         self.log_menu.delete(0, "end")
         self.log_menu.add_command(label=t["ctx_copy_sel"], command=self.action_copy_selected_log)
         self.log_menu.add_command(label=t["ctx_copy_all"], command=self.action_copy_all_log)
+        self.log_menu.add_command(label=t["ctx_copy_md"], command=self.action_copy_markdown_report)
         self.log_menu.add_separator()
         self.log_menu.add_command(label=t["ctx_select_all"], command=self.action_select_all_log)
 
@@ -634,6 +655,22 @@ class LinuxUnlockApp(tk.Tk):
     def action_copy_all_log(self) -> str:
         full_text = self.txt_log.get("1.0", "end-1c")
         self._copy_text_to_clipboard(full_text)
+        return "break"
+
+    def action_copy_markdown_report(self) -> str:
+        log_text = self.txt_log.get("1.0", "end-1c")
+        bench_rows = [tuple(self.tree_bench.item(item, "values")) for item in self.tree_bench.get_children()]
+        banner_txt = str(self.lbl_bench_banner.cget("text") or "")
+        md_text = core_detector.format_markdown_report(
+            self.hw_info,
+            bench_rows,
+            log_text,
+            platform_mode="linux",
+            bench_banner=banner_txt,
+        )
+        self._copy_text_to_clipboard(md_text)
+        t = I18N_LINUX[self.lang]
+        self.log(t["md_copied_log"].format(n=len(md_text)))
         return "break"
 
     def action_select_all_log(self) -> str:

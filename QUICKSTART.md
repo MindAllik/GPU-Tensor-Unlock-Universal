@@ -36,7 +36,7 @@ All register overrides are volatile and reside in GPU MMIO space until the next 
    - Power on the PC, open the BIOS One-Time Boot Menu (`F11` / `F12` / `F8`), and boot from the USB flash drive.
    - At the `BOOTX64.EFI` prompt, press **`U`** once within **30 seconds**. The loader executes the pre-driver unlock transaction, reconnects the display, writes `GPU-UNLOCK/RUNxx/REPORT.TXT`, and boots directly into Windows 10/11.
 7. **Verify the unlock and measure the speedup**:
-   - Launch **`Windows_Launch_UI.bat`**, click **`READ USB REPORT.TXT`** in Section `[03]` to inspect the stage-by-stage register readbacks (`SS0=0x88888888`, `SS1=0x8`), and run **`RUN LIVE TENSOR BENCHMARK`** $\rightarrow$ **`SAVE AS 'AFTER' (UNLOCKED)`** to confirm the `2.00x` `FMLA32` throughput gain.
+   - Launch **`Windows_Launch_UI.bat`**, click **`READ USB REPORT.TXT`** in Section `[03]` to inspect the stage-by-stage register readbacks (`SS0=0x88888888`, `SS1=0x8`), run **`RUN LIVE TENSOR BENCHMARK`** $\rightarrow$ **`SAVE AS 'AFTER' (UNLOCKED)`** to confirm the `2.00x` `FMLA32` throughput gain, and click **`COPY MARKDOWN REPORT`** in Section `[05]` if you want to share a formatted diagnostic report in GitHub Issues.
 
 ## 2. Quick Start on Linux (`./Linux_Launch_UI.sh` and CLI `make install`)
 

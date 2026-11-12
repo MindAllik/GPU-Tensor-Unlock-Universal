@@ -295,17 +295,29 @@ int gpu_unlock_boot_desc_parse(const u8 *data, size_t size, u32 image_size,
 	if (!data || !out || !image_size)
 		return GU_DIAG(-EINVAL);
 	if (size == 76) {
-		/* RM_FLCN_BL_DESC / RM_RISCV_UCODE_DESC v4 (76 bytes) used on Turing TU102 */
+		/* RM_RISCV_UCODE_DESC v4 (76 bytes) used on Turing TU102:
+		 * When bIsMonitorEnabled (offset 56) is 0 (GspRmBoot_TU102), words[1..4]
+		 * store bootloaderOffset (offset 4), bootloaderSize (offset 8),
+		 * bootloaderParamOffset (offset 12), and bootloaderParamSize (offset 16). */
 		u32 m_off = rd32(data + 32), d_off = rd32(data + 40), c_off = rd32(data + 48);
-		if (!c_off || !d_off || m_off >= image_size || d_off >= image_size || c_off >= image_size) {
+		u32 bl_off = rd32(data + 4), bl_sz = rd32(data + 8);
+		u32 param_off = rd32(data + 12), param_sz = rd32(data + 16);
+		u32 mon_en = rd32(data + 56);
+		if (!mon_en && bl_sz > 0 && param_sz > 0 &&
+		    bl_off < image_size && param_off < image_size &&
+		    bl_off + bl_sz <= image_size && param_off + param_sz <= image_size) {
+			c_off = bl_off;
+			d_off = param_off;
+			m_off = (m_off < image_size) ? m_off : 0u;
+		} else if (!c_off || !d_off || m_off >= image_size || d_off >= image_size || c_off >= image_size) {
 			m_off = rd32(data + 24);
 			d_off = rd32(data + 32);
 			c_off = rd32(data + 40);
-		}
-		if (!c_off || !d_off || m_off >= image_size || d_off >= image_size || c_off >= image_size) {
-			m_off = 0;
-			d_off = (image_size > 0x800u) ? 0x800u : 0u;
-			c_off = (image_size > 0x1800u) ? 0x1800u : 0u;
+			if (!c_off || !d_off || m_off >= image_size || d_off >= image_size || c_off >= image_size) {
+				m_off = 0;
+				d_off = (image_size > 0x800u) ? 0x800u : 0u;
+				c_off = (image_size > 0x1800u) ? 0x1800u : 0u;
+			}
 		}
 		out->manifest_offset = m_off;
 		out->data_offset = d_off;

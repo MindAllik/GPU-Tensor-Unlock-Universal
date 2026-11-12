@@ -10,7 +10,7 @@
 
 # GPU-Tensor-Unlock-Universal
 
-**Version: 1.3.0**
+**Version: 1.3.1**
 
 Consumer GeForce GPUs of the Ada Lovelace (`RTX 40xx`), Ampere (`RTX 30xx`), and Turing (`RTX 20xx`) generations carry the full physical Tensor Core execution units on silicon, but stock VBIOS firmware sets the `FMLA32` speed-select override (`0x0082381c` `SS0` / `0x00823820` `SS1` on Ada/Ampere, or `0x00409664` `SS0` / `0x0040966c` `SS1` on Turing) to half rate (`1`). Because of this fuse setting, matrix multiply-accumulate instructions that accumulate into 32-bit floating-point registers (`FP16 -> FP32`, `BF16 -> FP32`, `TF32 -> FP32`, and `FP8 E4M3 -> FP32`) run at half the issue rate of `FP16 -> FP16` or workstation RTX cards.
 
@@ -38,7 +38,7 @@ Upstream research repositories proved that the V67 SEC2 Booter chain works on Tu
 
    * **Linux (`./Linux_Launch_UI.sh`)**: Builds and verifies the pinned `610.43.03` firmware assets, stages `gpu_unlock.ko` via DKMS + early-boot `initramfs` hooks (or executes live `modprobe` for unbound secondary GPUs), parses transaction stages from `dmesg`, and reads hardware SM issue-rate dividers directly through `/dev/nvidiactl` (`ioctl 0x20801230`) without requiring a CUDA context.
 
-   * **Multi-language Console UI**: Supports instant switching between English (`EN`), Russian (`RU`), Chinese (`ZH`), and Hindi (`HI`).
+   * **Multi-language Console UI & One-Click Markdown Report**: Supports instant switching between English (`EN`), Russian (`RU`), Chinese (`ZH`), and Hindi (`HI`), and includes a **`COPY MARKDOWN REPORT`** button in Section `[05]` for instant GitHub Issues diagnostics export.
 
 2. **Multi-Source Hardware Auto-Detection & Profile Lock**
 
@@ -119,7 +119,7 @@ Source code in this repository is licensed under **GPL-2.0-only** (see `LICENSE`
 
 # GPU-Tensor-Unlock-Universal
 
-**Version: 1.3.0**
+**Version: 1.3.1**
 
 В пользовательских видеокартах GeForce поколений Ada Lovelace (`RTX 40xx`), Ampere (`RTX 30xx`) и Turing (`RTX 20xx`) физически распаяны полноценные тензорные блоки, однако в стоковом VBIOS регистр селектора скорости `FMLA32` (`0x0082381c` `SS0` / `0x00823820` `SS1` на Ada/Ampere или `0x00409664` `SS0` / `0x0040966c` `SS1` на Turing) выставлен в режим половинной частоты (`1`). Из-за этого матричные инструкции с накоплением результата в 32-битные регистры `FP32` (`FP16 -> FP32`, `BF16 -> FP32`, `TF32 -> FP32` и `FP8 E4M3 -> FP32`) исполняются вдвое медленнее, чем `FP16 -> FP16` или аналогичные инструкции на профессиональных картах RTX.
 
@@ -147,7 +147,7 @@ Source code in this repository is licensed under **GPL-2.0-only** (see `LICENSE`
 
    * **Linux (`./Linux_Launch_UI.sh`)**: собирает и верифицирует по SHA-256 ассеты прошивки `610.43.03`, устанавливает `gpu_unlock.ko` через DKMS и хуки ранней загрузки `initramfs` (или выполняет живой `modprobe` для непривязанных вторичных карт), разбирает этапы транзакции из `dmesg` и считывает аппаратные делители скорости SM напрямую через `/dev/nvidiactl` (`ioctl 0x20801230`) без инициализации CUDA.
 
-   * **Мультиязычный интерфейс**: мгновенное переключение между русским (`RU`), английским (`EN`), китайским (`ZH`) и хинди (`HI`).
+   * **Мультиязычный интерфейс и экспорт Markdown-отчета**: мгновенное переключение между русским (`RU`), английским (`EN`), китайским (`ZH`) и хинди (`HI`), а также кнопка **«СКОПИРОВАТЬ MARKDOWN-ОТЧЕТ»** (`COPY MARKDOWN REPORT`) в секции `[05]` для копирования готового шаблона диагностики в GitHub Issues.
 
 2. **Многоуровневое автоопределение оборудования и защита профиля**
 
