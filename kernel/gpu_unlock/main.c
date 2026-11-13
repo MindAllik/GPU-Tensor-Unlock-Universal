@@ -147,6 +147,8 @@ static int __init gpu_unlock_init(void)
 	if (!all)
 		report_unmatched();
 	while ((pdev = next_supported(pdev))) {
+		if (!all && !listed(pci_name(pdev)))
+			continue;
 		if (gu_is_ad103_exp_id(pdev->device) &&
 		    (all || strcasecmp(targets, pci_name(pdev)))) {
 			pci_err(pdev, "gpu_unlock: experimental AD103 requires a single exact PCI target\n");
@@ -167,8 +169,6 @@ static int __init gpu_unlock_init(void)
 			pci_err(pdev, "gpu_unlock: experimental Turing target requires a single exact PCI target\n");
 			continue;
 		}
-		if (!all && !listed(pci_name(pdev)))
-			continue;
 		if (!shared.gsp) {
 			ret = gpu_unlock_610_load_shared(pdev, &shared);
 			if (ret) {

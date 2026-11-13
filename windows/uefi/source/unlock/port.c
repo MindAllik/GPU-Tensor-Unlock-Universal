@@ -34,14 +34,15 @@ EFI_STATUS GuDmaAllocate(UINTN N, VOID **C, UINT64 *D) {
 #if defined(GU_ARCH_TURING) && GU_ARCH_TURING
   {
     EFI_PHYSICAL_ADDRESS HighAddr=0xffffffffffULL;
-    if(Gu.bs && Gu.bs->AllocatePages &&
-       !EFI_ERROR(Gu.bs->AllocatePages(AllocateMaxAddress,EfiBootServicesData,Entry->pages,&HighAddr)) &&
-       HighAddr>=0x100000000ULL) {
+    EFI_STATUS AllocStatus=(Gu.bs && Gu.bs->AllocatePages)
+      ? Gu.bs->AllocatePages(AllocateMaxAddress,EfiBootServicesData,Entry->pages,&HighAddr)
+      : EFI_UNSUPPORTED;
+    if(!EFI_ERROR(AllocStatus) && HighAddr>=0x100000000ULL) {
       Entry->cpu=(VOID *)(UINTN)HighAddr;
       Entry->via_bs_pages=TRUE;
       Status=EFI_SUCCESS;
     } else {
-      if(HighAddr && HighAddr<0x100000000ULL && Gu.bs && Gu.bs->FreePages)
+      if(!EFI_ERROR(AllocStatus) && HighAddr<0x100000000ULL && Gu.bs && Gu.bs->FreePages)
         Gu.bs->FreePages(HighAddr,Entry->pages);
       Status=Gu.pci->AllocateBuffer(Gu.pci,AllocateAnyPages,EfiBootServicesData,
         Entry->pages,&Entry->cpu,0);

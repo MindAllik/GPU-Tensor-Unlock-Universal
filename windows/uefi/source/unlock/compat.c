@@ -36,7 +36,8 @@ VOID GuCopyFromIo(VOID *D,const VOID *S,size_t N) {
 }
 void *dma_alloc_coherent(struct device *D,size_t N,dma_addr_t *Address,int Flags) {
   VOID *Cpu=NULL;(void)Flags;
-  if(!D->dma_mask || *D->dma_mask!=0xffffffffULL || D->coherent_dma_mask!=0xffffffffULL)return NULL;
+  UINT64 ExpectedMask=(GU_ARCH_TURING)?0xffffffffffULL:0xffffffffULL;
+  if(!D->dma_mask || *D->dma_mask!=ExpectedMask || D->coherent_dma_mask!=ExpectedMask)return NULL;
   if(EFI_ERROR(GuDmaAllocate(N,&Cpu,Address)))return NULL;return Cpu;
 }
 void dma_free_coherent(struct device *D,size_t N,void *P,dma_addr_t A) {

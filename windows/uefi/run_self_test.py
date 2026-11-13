@@ -424,6 +424,94 @@ int main(void) {
         )
         r_laptop = subprocess.run([str(probe_laptop_exe)], cwd=src_laptop, capture_output=True, text=True, check=True)
         print(r_laptop.stdout.strip())
+
+        # 7. Turing TU102 (RTX 2080 Ti 0x1e0410de, GU_ARCH_TURING=1) 40-bit DMA mask & compat.c/port.c validation
+        probe_tu_c = work / "probe_turing.c"
+        probe_tu_c.write_text("""
+#include "port.h"
+#include "compat/compat.h"
+void *calloc(size_t, size_t);
+void *aligned_alloc(size_t, size_t);
+void free(void *);
+void abort(void);
+int puts(const char *s);
+static EFI_STATUS EFIAPI mock_alloc_pool(EFI_MEMORY_TYPE t, UINTN n, VOID **buf) {
+    (void)t; *buf = calloc(1, n ? n : 1); return *buf ? EFI_SUCCESS : EFI_OUT_OF_RESOURCES;
+}
+static EFI_STATUS EFIAPI mock_free_pool(VOID *buf) { free(buf); return EFI_SUCCESS; }
+static EFI_STATUS EFIAPI mock_alloc_pages(EFI_ALLOCATE_TYPE type, EFI_MEMORY_TYPE mem, UINTN pages, EFI_PHYSICAL_ADDRESS *addr) {
+    (void)type; (void)mem;
+    VOID *p = aligned_alloc(4096, pages * 4096);
+    if (!p) return EFI_OUT_OF_RESOURCES;
+    /* Simulate low physical address (<4 GiB) or high (>4 GiB) cleanly */
+    *addr = (EFI_PHYSICAL_ADDRESS)(UINTN)p;
+    return EFI_SUCCESS;
+}
+static EFI_STATUS EFIAPI mock_free_pages(EFI_PHYSICAL_ADDRESS addr, UINTN pages) {
+    (void)pages; free((VOID *)(UINTN)addr); return EFI_SUCCESS;
+}
+static EFI_STATUS EFIAPI mock_alloc_buf(EFI_PCI_IO_PROTOCOL *this, EFI_ALLOCATE_TYPE type, EFI_MEMORY_TYPE mem, UINTN pages, VOID **host, UINT64 attrs) {
+    (void)this; (void)type; (void)mem; (void)attrs;
+    *host = aligned_alloc(4096, pages * 4096);
+    return *host ? EFI_SUCCESS : EFI_OUT_OF_RESOURCES;
+}
+static EFI_STATUS EFIAPI mock_free_buf(EFI_PCI_IO_PROTOCOL *this, UINTN pages, VOID *host) {
+    (void)this; (void)pages; free(host); return EFI_SUCCESS;
+}
+static EFI_STATUS EFIAPI mock_map(EFI_PCI_IO_PROTOCOL *this, EFI_PCI_IO_PROTOCOL_OPERATION op, VOID *host, UINTN *bytes, EFI_PHYSICAL_ADDRESS *dma, VOID **mapping) {
+    (void)this; (void)op; (void)bytes; *dma = 0x120000000ULL; *mapping = host; return EFI_SUCCESS;
+}
+static EFI_STATUS EFIAPI mock_unmap(EFI_PCI_IO_PROTOCOL *this, VOID *mapping) {
+    (void)this; (void)mapping; return EFI_SUCCESS;
+}
+VOID GuLog(const char *fmt, ...) { (void)fmt; }
+VOID GuLogText(const char *t) { (void)t; }
+int main(void) {
+    EFI_BOOT_SERVICES bs = {0};
+    EFI_PCI_IO_PROTOCOL pci = {0};
+    bs.AllocatePool = mock_alloc_pool;
+    bs.FreePool = mock_free_pool;
+    bs.AllocatePages = mock_alloc_pages;
+    bs.FreePages = mock_free_pages;
+    pci.AllocateBuffer = mock_alloc_buf;
+    pci.FreeBuffer = mock_free_buf;
+    pci.Map = mock_map;
+    pci.Unmap = mock_unmap;
+    GuInit(&bs, &pci);
+    Gu.owned = TRUE;
+    u64 mask = DMA_BIT_MASK(32);
+    struct device dev = {.dma_mask = &mask, .coherent_dma_mask = DMA_BIT_MASK(32)};
+    if (dma_set_mask(&dev, DMA_BIT_MASK(40)) != 0) abort();
+    if (dma_set_coherent_mask(&dev, DMA_BIT_MASK(40)) != 0) abort();
+    dma_addr_t dma = 0;
+    void *cpu = dma_alloc_coherent(&dev, 4096, &dma, GFP_KERNEL);
+    if (!cpu || dma != 0x120000000ULL) abort();
+    dma_free_coherent(&dev, 4096, cpu, dma);
+    if (Gu.allocations != NULL || Gu.dma_count != 0) abort();
+    puts("Turing TU102 (GU_ARCH_TURING=1) 40-bit DMA mask & dma_alloc_coherent PASS");
+    return 0;
+}
+""")
+        prof_tu = work / "prof_tu"
+        prof_tu.mkdir()
+        (prof_tu / "local_profile.h").write_text("""#pragma once
+#define GU_BOARD_ID 0x1e0410deU
+#define GU_BOARD_SUBSYSTEM 0x1e0410deU
+#define GU_BOARD_CHIP 0x162000a1U
+#define GU_ARCH_ADA 0
+#define GU_ARCH_TURING 1
+""")
+        src_tu = work / "src_tu"
+        shutil.copytree(src, src_tu)
+        shutil.copy2(prof_tu / "local_profile.h", src_tu / "unlock" / "local_profile.h")
+        probe_tu_exe = work / "probe_turing_asan"
+        subprocess.run(
+            ["gcc", f"-I{prof_tu}", *asan_flags, str(probe_tu_c), "unlock/compat.c", "unlock/port.c", "unlock/runtime.c", "-o", str(probe_tu_exe)],
+            cwd=src_tu,
+            check=True,
+        )
+        r_tu = subprocess.run([str(probe_tu_exe)], cwd=src_tu, capture_output=True, text=True, check=True)
+        print(r_tu.stdout.strip())
         return 0
 
 

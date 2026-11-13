@@ -16,6 +16,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -201,9 +202,6 @@ def check_linux_installation_state(kernel_release: str | None = None) -> dict[st
                 if fname in ("gsp_ga10x.bin", "gsp_tu10x.bin") and core_detector._validate_gsp_elf_sections(
                     fpath, is_turing=(fname == "gsp_tu10x.bin")
                 ):
-                    fw_present_count += 1
-                    continue
-                if fname in ("booter_load_tu102.bin", "gsp_boot_tu102.bin", "gsp_boot_desc_tu102.bin") and st_sz > 0:
                     fw_present_count += 1
                     continue
             except Exception:
@@ -485,12 +483,9 @@ def build_all_linux_firmware_assets(
             (f"gsp_boot_{chip_tag}.bin", boot_bin),
             (f"gsp_boot_desc_{chip_tag}.bin", desc_bin),
         ):
-            if chip_tag == "tu102":
-                exp_sz, exp_sha = len(blob), core_detector.sha256_bytes(blob)
-            else:
-                exp_sz, exp_sha = ALL_LINUX_FIRMWARE_SPECS[fname]
-                if len(blob) != exp_sz or core_detector.sha256_bytes(blob) != exp_sha:
-                    raise ValueError(f"SHA-256 verification failed for {fname}")
+            exp_sz, exp_sha = ALL_LINUX_FIRMWARE_SPECS[fname]
+            if len(blob) != exp_sz or core_detector.sha256_bytes(blob) != exp_sha:
+                raise ValueError(f"SHA-256 verification failed for {fname}")
             core_detector._write_verified_file(assets_dir / fname, blob, exp_sha)
             log_fn(f"[OK] Generated & verified {fname} ({exp_sz} bytes)")
 
@@ -587,7 +582,7 @@ def _run_privileged_shell(script_cmd: str, log_fn: Callable[[str], None]) -> int
             cmd = ["pkexec", "bash", "-c", script_cmd]
         else:
             log_fn("[INFO] Interactive sudo password required. Run the printed command in your terminal:")
-            log_fn(f"  sudo bash -c '{script_cmd}'")
+            log_fn(f"  sudo bash -c {shlex.quote(script_cmd)}")
             return 126
     elif shutil.which("pkexec") and os.environ.get("DISPLAY"):
         cmd = ["pkexec", "bash", "-c", script_cmd]
