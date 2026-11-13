@@ -601,7 +601,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
         3. Version is 1.2.9 across README.md, core_detector.py, and UEFI headers.
         """
         import struct, tempfile
-        self.assertEqual(core_detector.get_app_version(), "1.3.1")
+        self.assertEqual(core_detector.get_app_version(), "1.3.2")
         shstrtab = b"\x00.shstrtab\x00.fwimage\x00.fwsignature_tu10x\x00"
         while len(shstrtab) % 8 != 0:
             shstrtab += b"\x00"
@@ -741,7 +741,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
 
 
     def test_v131_copy_markdown_report_and_laptop_display_and_turing_desc(self) -> None:
-        """Verify v1.3.1 additions:
+        """Verify v1.3.2 additions:
         1. Copy Markdown Report button & localizations (EN/RU/ZH/HI) in both Windows and Linux UIs.
         2. format_markdown_report() output formatting.
         3. Laptop InsydeH2O ConSplitterDxe pathless virtual GOP skip in app.c.
@@ -780,7 +780,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
             platform_mode="windows",
             bench_banner="RTX 3050 Laptop GPU // MEASURED_UNLOCKED [Ratio: 1.00]",
         )
-        self.assertIn("## NVIDIA GPU Tensor Unlock — Diagnostic Report (`v1.3.1`)", md)
+        self.assertIn("## NVIDIA GPU Tensor Unlock — Diagnostic Report (`v1.3.2`)", md)
         self.assertIn("`NVIDIA GeForce RTX 3050 Laptop GPU` (Laptop / Mobile dGPU)", md)
         self.assertIn("`0x25a210de` / `0x16081025`", md)
         self.assertIn("| `FP16 -> FP32 (FMLA32)` | `FMLA32` | 25.10 TFLOP/s | 50.20 TFLOP/s | 50.20 TFLOP/s | **2.00x (+100.0%)** |", md)

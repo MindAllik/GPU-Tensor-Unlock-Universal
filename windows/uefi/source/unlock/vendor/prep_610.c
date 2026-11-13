@@ -178,9 +178,11 @@ int gpu_unlock_boot_desc_parse(const u8 *data, size_t size, u32 image_size,
 		if (!mon_en && bl_sz > 0 && param_sz > 0 &&
 		    bl_off < image_size && param_off < image_size &&
 		    bl_off + bl_sz <= image_size && param_off + param_sz <= image_size) {
+			u32 elf_off = rd32(data + 20), elf_sz = rd32(data + 24);
 			c_off = bl_off;
 			d_off = param_off;
-			m_off = (m_off < image_size) ? m_off : 0u;
+			m_off = (m_off > 0 && m_off < image_size) ? m_off :
+				((elf_sz > 0 && elf_off < image_size && elf_off + elf_sz <= image_size) ? elf_off : 0u);
 		} else if (!c_off || !d_off || m_off >= image_size || d_off >= image_size || c_off >= image_size) {
 			m_off = rd32(data + 24);
 			d_off = rd32(data + 32);

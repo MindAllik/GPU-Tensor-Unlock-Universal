@@ -36,7 +36,7 @@ def get_app_version() -> str:
         m = re.search(r"\*\*Version:\s*([0-9]+\.[0-9]+\.[0-9]+)\*\*", readme.read_text(encoding="utf-8", errors="replace"))
         if m:
             return m.group(1)
-    return "1.3.1"
+    return "1.3.2"
 
 
 APP_VERSION: str = get_app_version()

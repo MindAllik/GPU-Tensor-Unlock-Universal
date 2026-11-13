@@ -31,23 +31,45 @@ EFI_STATUS GuDmaAllocate(UINTN N, VOID **C, UINT64 *D) {
   if(!N || N>(128U<<20) || Gu.fault || Gu.retained || !Gu.pci || !Gu.owned)return EFI_INVALID_PARAMETER;
   Entry=GuAlloc(sizeof(*Entry));if(!Entry)return EFI_OUT_OF_RESOURCES;
   Entry->pages=(N+4095)/4096;Entry->bytes=Entry->pages*4096;
+#if defined(GU_ARCH_TURING) && GU_ARCH_TURING
+  {
+    EFI_PHYSICAL_ADDRESS HighAddr=0xffffffffffULL;
+    if(Gu.bs && Gu.bs->AllocatePages &&
+       !EFI_ERROR(Gu.bs->AllocatePages(AllocateMaxAddress,EfiBootServicesData,Entry->pages,&HighAddr)) &&
+       HighAddr>=0x100000000ULL) {
+      Entry->cpu=(VOID *)(UINTN)HighAddr;
+      Entry->via_bs_pages=TRUE;
+      Status=EFI_SUCCESS;
+    } else {
+      if(HighAddr && HighAddr<0x100000000ULL && Gu.bs && Gu.bs->FreePages)
+        Gu.bs->FreePages(HighAddr,Entry->pages);
+      Status=Gu.pci->AllocateBuffer(Gu.pci,AllocateAnyPages,EfiBootServicesData,
+        Entry->pages,&Entry->cpu,0);
+    }
+  }
+#else
   Status=Gu.pci->AllocateBuffer(Gu.pci,AllocateAnyPages,EfiBootServicesData,
     Entry->pages,&Entry->cpu,0);
+#endif
   if(EFI_ERROR(Status) || !Entry->cpu) {GuFree(Entry);return EFI_ERROR(Status)?Status:EFI_OUT_OF_RESOURCES;}
   memset(Entry->cpu,0,Entry->bytes);Mapped=Entry->bytes;
   Status=Gu.pci->Map(Gu.pci,EfiPciIoOperationBusMasterCommonBuffer,Entry->cpu,
     &Mapped,&Entry->dma,&Entry->mapping);
   if(!EFI_ERROR(Status))Entry->mapped=TRUE;
-  if(EFI_ERROR(Status) || Mapped!=Entry->bytes || !Entry->dma ||
-     (Entry->dma&4095) || Entry->dma>0xffffffffULL || Entry->bytes-1>0xffffffffULL-Entry->dma) {
-    if(!EFI_ERROR(Status))Status=EFI_UNSUPPORTED;
-    if(Entry->mapped && EFI_ERROR(Gu.pci->Unmap(Gu.pci,Entry->mapping))) {
-      Entry->next=Gu.allocations;Gu.allocations=Entry;Gu.retained=TRUE;return Status;
+  {
+    UINT64 DmaLimit = (GU_ARCH_TURING) ? 0xffffffffffULL : 0xffffffffULL;
+    if(EFI_ERROR(Status) || Mapped!=Entry->bytes || !Entry->dma ||
+       (Entry->dma&4095) || Entry->dma>DmaLimit || Entry->bytes-1>DmaLimit-Entry->dma) {
+      if(!EFI_ERROR(Status))Status=EFI_UNSUPPORTED;
+      if(Entry->mapped && EFI_ERROR(Gu.pci->Unmap(Gu.pci,Entry->mapping))) {
+        Entry->next=Gu.allocations;Gu.allocations=Entry;Gu.retained=TRUE;return Status;
+      }
+      if(Entry->via_bs_pages ? (!Gu.bs || !Gu.bs->FreePages || EFI_ERROR(Gu.bs->FreePages((EFI_PHYSICAL_ADDRESS)(UINTN)Entry->cpu,Entry->pages)))
+                             : EFI_ERROR(Gu.pci->FreeBuffer(Gu.pci,Entry->pages,Entry->cpu))) {
+        Entry->mapped=FALSE;Entry->next=Gu.allocations;Gu.allocations=Entry;Gu.retained=TRUE;return Status;
+      }
+      GuFree(Entry);return Status;
     }
-    if(EFI_ERROR(Gu.pci->FreeBuffer(Gu.pci,Entry->pages,Entry->cpu))) {
-      Entry->mapped=FALSE;Entry->next=Gu.allocations;Gu.allocations=Entry;Gu.retained=TRUE;return Status;
-    }
-    GuFree(Entry);return Status;
   }
   Entry->next=Gu.allocations;Gu.allocations=Entry;Gu.dma_count++;
   *C=Entry->cpu;*D=Entry->dma;
@@ -67,7 +89,9 @@ EFI_STATUS GuDmaFree(VOID *C, UINT64 D) {
     if(EFI_ERROR(Status)) {Gu.retained=TRUE;return Status;}
     Entry->mapped=FALSE;
   }
-  Status=Gu.pci->FreeBuffer(Gu.pci,Entry->pages,Entry->cpu);
+  Status=Entry->via_bs_pages
+    ? ((Gu.bs && Gu.bs->FreePages) ? Gu.bs->FreePages((EFI_PHYSICAL_ADDRESS)(UINTN)Entry->cpu,Entry->pages) : EFI_UNSUPPORTED)
+    : Gu.pci->FreeBuffer(Gu.pci,Entry->pages,Entry->cpu);
   if(EFI_ERROR(Status)) {Gu.retained=TRUE;return Status;}
   *Link=Entry->next;GuFree(Entry);if(Gu.dma_count)Gu.dma_count--;return EFI_SUCCESS;
 }

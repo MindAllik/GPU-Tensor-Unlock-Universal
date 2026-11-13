@@ -2,7 +2,7 @@
 /* Hardware & System Profile (populated automatically by the Universal USB Builder UI) */
 #pragma once
 
-#define GU_APP_VERSION "1.3.1"
+#define GU_APP_VERSION "1.3.2"
 #define GU_BOARD_ID 0x278210deU
 #define GU_BOARD_SUBSYSTEM 0xf2941569U
 #define GU_BOARD_CHIP 0x194000a1U

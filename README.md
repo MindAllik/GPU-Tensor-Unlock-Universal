@@ -1,6 +1,6 @@
 # GPU-Tensor-Unlock-Universal
 
-**Version: 1.3.1**
+**Version: 1.3.2**
 
 **Pre-driver `FMLA32` Tensor Core unlocker and PTX benchmark console for GeForce RTX 40-series (Ada Lovelace), RTX 30-series (Ampere), and RTX 20-series (Turing) on Windows 10/11 (UEFI USB) and Linux (`gpu_unlock.ko`).**
 

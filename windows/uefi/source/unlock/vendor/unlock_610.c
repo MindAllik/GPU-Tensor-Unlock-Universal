@@ -332,21 +332,21 @@ static int falcon_reset(struct unlock_transaction_work *work, const struct falco
 	ret = poll_us(work, eng->base + 0xf4, 1u << 12, 0, 1000000, true);
 	if (ret)
 		return GU_RESULT(ret);
-	ret = poll_us(work, eng->base + 0x10c, 6u, 0, 1000000, true);
-	if (ret)
-		return GU_RESULT(ret);
 	if (read_bar(work, eng->base + 0xf4, &hwcfg) || inaccessible(hwcfg))
 		return GU_RESULT(-EIO);
 	if (hwcfg & (1u << 10)) {
 		if (read_bar(work, eng->falcon2 + 0x668, &bcr) || inaccessible(bcr))
 			return GU_RESULT(-ENODEV);
-		if (bcr & (1u << 4)) {
+		if ((bcr & 0x11) != 1) {
 			write_bar(work, eng->falcon2 + 0x668, 0);
 			ret = poll_us(work, eng->falcon2 + 0x668, 0x11, 1, 1000000, true);
 			if (ret)
 				return GU_RESULT(ret);
 		}
 	}
+	ret = poll_us(work, eng->base + 0x10c, 6u, 0, 1000000, true);
+	if (ret)
+		return GU_RESULT(ret);
 	if (read_bar(work, 0, &chip) || inaccessible(chip))
 		return GU_RESULT(-ENODEV);
 	write_bar(work, eng->base + 0x84, chip);
@@ -528,7 +528,7 @@ static int falcon_hs(struct unlock_transaction_work *work, const struct falcon_e
 	write_bar(work, eng->base + 0x10c, 0);
 	if (read_bar(work, eng->fbif, &trans) || inaccessible(trans))
 		return GU_RESULT(-ENODEV);
-	trans = (trans & ~7u) | 5u;
+	trans = GU_ARCH_TURING ? ((trans & ~0x1fu) | 0x15u) : ((trans & ~7u) | 5u);
 	write_bar(work, eng->fbif, trans);
 	if (ns_size > 0) {
 		u32 trans4 = 0;
@@ -1148,15 +1148,19 @@ static int unlock_transaction_dma(struct unlock_transaction_work *work)
 	work->streaming_ptr = dev->dma_mask;
 	work->streaming_before = *dev->dma_mask;
 	work->coherent_before = dev->coherent_dma_mask;
-	dev_info(dev, "DMA masks: streaming=%#llx coherent=%#llx requested=%#llx\n",
-		(unsigned long long)work->streaming_before, (unsigned long long)work->coherent_before,
-		(unsigned long long)DMA_BIT_MASK(32));
-	work->streaming_set = true;
-	if (GU_DIAG(dma_set_mask(dev, DMA_BIT_MASK(32))))
-		return GU_RESULT(-EIO);
-	work->coherent_set = true;
-	if (GU_DIAG(dma_set_coherent_mask(dev, DMA_BIT_MASK(32))))
-		return GU_RESULT(-EIO);
+	{
+		u64 req_mask = GU_ARCH_TURING ? DMA_BIT_MASK(40) : DMA_BIT_MASK(32);
+
+		dev_info(dev, "DMA masks: streaming=%#llx coherent=%#llx requested=%#llx\n",
+			(unsigned long long)work->streaming_before, (unsigned long long)work->coherent_before,
+			(unsigned long long)req_mask);
+		work->streaming_set = true;
+		if (GU_DIAG(dma_set_mask(dev, req_mask)))
+			return GU_RESULT(-EIO);
+		work->coherent_set = true;
+		if (GU_DIAG(dma_set_coherent_mask(dev, req_mask)))
+			return GU_RESULT(-EIO);
+	}
 	work->booter_cpu = diag_dma_alloc(work, "booter", work->booter_image_size,
 					      &work->booter_dma, GFP_KERNEL);
 	if (!work->booter_cpu)
@@ -1644,7 +1648,7 @@ static int unlock_transaction_selector(struct unlock_transaction_work *work)
 static int hold_sec2_reset(struct unlock_transaction_work *work, const char *phase)
 {
 	unsigned int j;
-	u32 engine, before, first = 0, hwcfg;
+	u32 engine, before, first = 0, hwcfg, bcr;
 	int ret;
 
 	if (read_bar(work, SEC2_BASE + 0x3c0, &engine) || inaccessible(engine))
@@ -1696,11 +1700,21 @@ static int hold_sec2_reset(struct unlock_transaction_work *work, const char *pha
 	ret = poll_us(work, SEC2_BASE + 0xf4, 1u << 12, 0, 1000000, true);
 	if (ret)
 		return GU_RESULT(ret);
+	if (read_bar(work, SEC2_BASE + 0xf4, &hwcfg) || inaccessible(hwcfg))
+		return GU_RESULT(-EIO);
+	if (hwcfg & (1u << 10)) {
+		if (read_bar(work, SEC2_FALCON2 + 0x668, &bcr) || inaccessible(bcr))
+			return GU_RESULT(-ENODEV);
+		if ((bcr & 0x11) != 1) {
+			write_bar(work, SEC2_FALCON2 + 0x668, 0);
+			ret = poll_us(work, SEC2_FALCON2 + 0x668, 0x11, 1, 1000000, true);
+			if (ret)
+				return GU_RESULT(ret);
+		}
+	}
 	ret = poll_us(work, SEC2_BASE + 0x10c, 6u, 0, 1000000, true);
 	if (ret)
 		return GU_RESULT(ret);
-	if (read_bar(work, SEC2_BASE + 0xf4, &hwcfg) || inaccessible(hwcfg))
-		return GU_RESULT(-EIO);
 	dev_info(&work->pdev->dev, "engine reset released: phase=%s base=%#x engine=%#x hwcfg2=%#x\n",
 		 phase, SEC2_BASE, engine, hwcfg);
 	return 0;

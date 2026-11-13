@@ -8,7 +8,7 @@
 #include "local_profile.h"
 
 #ifndef GU_APP_VERSION
-#define GU_APP_VERSION "1.3.1"
+#define GU_APP_VERSION "1.3.2"
 #endif
 
 #ifndef GU_BOARD_ID
@@ -81,6 +81,7 @@ struct GU_DMA {
   UINTN bytes;
   UINTN pages;
   BOOLEAN mapped;
+  BOOLEAN via_bs_pages;
 };
 typedef struct {
   EFI_BOOT_SERVICES *bs;
