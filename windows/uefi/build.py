@@ -4,6 +4,8 @@ import argparse, hashlib, json, shutil, subprocess, tempfile
 
 p = argparse.ArgumentParser()
 p.add_argument('--enable-experiment', action='store_true')
+p.add_argument('--chain-next', type=int, default=0, metavar='N',
+               help='Multi-GPU: after unlocking, start \\GPU-UNLOCK\\STAGE<N>.EFI (N>=2) instead of Windows')
 p.add_argument('--clang', default='clang', help='Path or name of clang compiler executable')
 p.add_argument('--linker', default='lld-link', help='Path or name of lld-link executable')
 p.add_argument('--profile-dir', type=Path, default=None,
@@ -51,6 +53,10 @@ with tempfile.TemporaryDirectory(prefix='uefi_build_src_') as tmp_src:
     ]
     if a.enable_experiment:
         flags += ['-DKOH_ENABLE_EXPERIMENT=1']
+    if a.chain_next:
+        if a.chain_next < 2 or a.chain_next > 99:
+            p.error('--chain-next must be in 2..99')
+        flags += ['-DGU_CHAIN_STAGE2=1', f'-DGU_NEXT_STAGE_NUM={a.chain_next}']
 
     objects = []
     for name in names:

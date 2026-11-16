@@ -2,7 +2,7 @@
 /* Hardware & System Profile (populated automatically by the Universal USB Builder UI) */
 #pragma once
 
-#define GU_APP_VERSION "1.3.2"
+#define GU_APP_VERSION "1.3.3"
 #define GU_BOARD_ID 0x278210deU
 #define GU_BOARD_SUBSYSTEM 0xf2941569U
 #define GU_BOARD_CHIP 0x194000a1U
@@ -23,3 +23,4 @@
 #define KOH_PAYLOAD_ESP_GUID 0x7a8150e1U,0xc25fU,0x4a16U,{0x94,0x73,0x4a,0x16,0x2c,0x4d,0x45,0x9a}
 #define KOH_AUTOCONFIRM_MS 30000
 #define KOH_UNATTENDED_AUTOFIRE 0
+#define KOH_INTERNAL_DISK_MODE 0

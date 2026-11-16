@@ -46,6 +46,8 @@ class UniversalUnlockApp(tk.Tk):
 
         self.hw_info: dict[str, Any] = {}
         self.usb_drives: list[dict[str, Any]] = []
+        self.internal_targets: list[dict[str, Any]] = []
+        self.boot_prereq: dict[str, Any] = {}
         self.last_bench_result: dict[str, Any] | None = None
         self.bench_history: dict[str, Any] = tensor_benchmark.load_benchmark_history()
         self.busy = False
@@ -76,6 +78,11 @@ class UniversalUnlockApp(tk.Tk):
             self.btn_export_folder,
             self.btn_read_report,
             self.btn_cold_shutdown,
+            self.btn_install_internal,
+            self.btn_oneshot_boot,
+            self.btn_uninstall_internal,
+            self.chk_multi_gpu,
+            self.btn_relaunch_admin,
             self.btn_run_bench,
             self.btn_save_before,
             self.btn_save_after,
@@ -395,6 +402,19 @@ class UniversalUnlockApp(tk.Tk):
         self.btn_build_usb.grid(row=0, column=0, sticky="ew", padx=(0, 3))
         self.btn_export_folder = self._make_btn(build_row, self.action_export_folder)
         self.btn_export_folder.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+        self.var_multi_gpu = tk.BooleanVar(value=False)
+        self.chk_multi_gpu = tk.Checkbutton(
+            self.pnl_usb,
+            text=I18N[self.lang]["chk_multi_gpu"],
+            variable=self.var_multi_gpu,
+            bg=BG_PANEL,
+            fg=FG_PRIMARY,
+            selectcolor=BG_INPUT,
+            activebackground=BG_PANEL,
+            activeforeground=FG_PRIMARY,
+            anchor="w",
+        )
+        self.chk_multi_gpu.pack(fill="x", pady=(0, 2))
 
         usb_sub_row = tk.Frame(self.pnl_usb, bg=BG_PANEL)
         usb_sub_row.pack(fill="x")
@@ -404,6 +424,36 @@ class UniversalUnlockApp(tk.Tk):
         self.btn_read_report.grid(row=0, column=0, sticky="ew", padx=(0, 3))
         self.btn_cold_shutdown = self._make_btn(usb_sub_row, self.action_cold_shutdown, danger=True)
         self.btn_cold_shutdown.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+
+        # No-USB Internal Disk Auto-Unlock sub-section
+        int_sep = tk.Frame(self.pnl_usb, bg=BORDER_COL, height=1)
+        int_sep.pack(fill="x", pady=(6, 4))
+        self.lbl_internal_hdr = tk.Label(self.pnl_usb, text="", bg=BG_PANEL, fg=FG_CYAN, font=("Consolas", 9, "bold"), anchor="w")
+        self.lbl_internal_hdr.pack(fill="x", pady=(0, 1))
+        self.lbl_internal_status = tk.Label(self.pnl_usb, text="...", bg=BG_INPUT, fg=FG_MUTED, font=("Consolas", 8), anchor="w", padx=6, pady=3)
+        self.lbl_internal_status.pack(fill="x", pady=(0, 3))
+        self.lbl_internal_target = tk.Label(self.pnl_usb, text="", bg=BG_PANEL, fg=FG_PRIMARY, font=("Consolas", 8), anchor="w")
+        self.lbl_internal_target.pack(fill="x", pady=(0, 1))
+
+        int_sel_row = tk.Frame(self.pnl_usb, bg=BG_PANEL)
+        int_sel_row.pack(fill="x", pady=(0, 3))
+        self.var_internal_target = tk.StringVar(value="")
+        self.cb_internal_target = ttk.Combobox(int_sel_row, textvariable=self.var_internal_target, state="readonly", style="Console.TCombobox", font=("Consolas", 8))
+        self.cb_internal_target.pack(side="left", fill="x", expand=True, padx=(0, 4))
+        self.btn_relaunch_admin = self._make_btn(int_sel_row, self.action_relaunch_admin)
+        self.btn_relaunch_admin.pack(side="left")
+
+        int_btn_row = tk.Frame(self.pnl_usb, bg=BG_PANEL)
+        int_btn_row.pack(fill="x", pady=(1, 2))
+        int_btn_row.columnconfigure(0, weight=1)
+        int_btn_row.columnconfigure(1, weight=1)
+        self.btn_install_internal = self._make_btn(int_btn_row, self.action_install_internal_boot, accent=True)
+        self.btn_install_internal.grid(row=0, column=0, sticky="ew", padx=(0, 3))
+        self.btn_oneshot_boot = self._make_btn(int_btn_row, self.action_oneshot_boot)
+        self.btn_oneshot_boot.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+
+        self.btn_uninstall_internal = self._make_btn(self.pnl_usb, self.action_uninstall_internal_boot, danger=True)
+        self.btn_uninstall_internal.pack(fill="x", pady=(1, 0))
 
         # --- RIGHT COLUMN: [04] TENSOR CORE BENCHMARK ---
         self.pnl_bench, self.hdr_bench = self._make_panel(right_col)
@@ -565,6 +615,7 @@ class UniversalUnlockApp(tk.Tk):
         self.hdr_console.configure(text=t["sec_console"])
         self.lbl_drag_hint.configure(text=t["drag_console_hint"])
         self.btn_copy_log.configure(text=t["btn_copy_log"])
+        self.chk_multi_gpu.configure(text=t["chk_multi_gpu"])
         self.btn_copy_md_report.configure(text=t["btn_copy_md_report"])
         self.log_menu.delete(0, "end")
         self.log_menu.add_command(label=t["ctx_copy_sel"], command=self.action_copy_selected_log)
@@ -589,6 +640,13 @@ class UniversalUnlockApp(tk.Tk):
         self.btn_export_folder.configure(text=t["btn_export_folder"])
         self.btn_read_report.configure(text=t["btn_read_report"])
         self.btn_cold_shutdown.configure(text=t["btn_cold_shutdown"])
+        self.lbl_internal_hdr.configure(text=t["sec_internal_boot"])
+        self.lbl_internal_target.configure(text=t["lbl_internal_target"])
+        self.btn_relaunch_admin.configure(text=t["btn_relaunch_admin"])
+        self.btn_install_internal.configure(text=t["btn_install_internal"])
+        self.btn_oneshot_boot.configure(text=t["btn_oneshot_boot"])
+        self.btn_uninstall_internal.configure(text=t["btn_uninstall_internal"])
+        self._refresh_internal_boot_status()
 
         self.btn_run_bench.configure(text=t["btn_run_bench"])
         self.btn_save_before.configure(text=t["btn_save_before"])
@@ -760,10 +818,14 @@ class UniversalUnlockApp(tk.Tk):
         def _worker() -> None:
             info: dict[str, Any] = {}
             drives: list[dict[str, Any]] = []
+            int_targets: list[dict[str, Any]] = []
+            prereq: dict[str, Any] = {}
             err_msg: str | None = None
             try:
                 info = core_detector.detect_host_environment()
                 drives = core_detector.list_usb_drives()
+                int_targets = core_detector.list_internal_boot_targets()
+                prereq = core_detector.check_windows_boot_prerequisites()
             except Exception as exc:
                 err_msg = str(exc)
 
@@ -774,6 +836,9 @@ class UniversalUnlockApp(tk.Tk):
                         return
                     self.hw_info = info
                     self.usb_drives = drives
+                    self.internal_targets = int_targets
+                    self.boot_prereq = prereq
+                    self._apply_internal_targets_ui()
                     gpus = info.get("gpus") or []
                     if gpus:
                         gpu_labels = [f"[{g['index']}] {g['gpu_name']} ({g['pci_bdf']})" for g in gpus]
@@ -840,9 +905,14 @@ class UniversalUnlockApp(tk.Tk):
 
         def _worker() -> None:
             drives = core_detector.list_usb_drives()
+            int_targets = core_detector.list_internal_boot_targets()
+            prereq = core_detector.check_windows_boot_prerequisites()
 
             def _apply() -> None:
                 try:
+                    self.internal_targets = int_targets
+                    self.boot_prereq = prereq
+                    self._apply_internal_targets_ui()
                     self.usb_drives = drives
                     if self.usb_drives:
                         values = [d["display"] for d in self.usb_drives]
@@ -943,8 +1013,48 @@ class UniversalUnlockApp(tk.Tk):
             return
         self._run_stage_job(folder, target_mode="export")
 
+    def _collect_all_gpu_cfgs(self) -> list[dict[str, Any]]:
+        """One profile per detected supported GPU, built from the scanned GPU list."""
+        gpus = self.hw_info.get("gpus") or []
+        base = self._collect_profile_cfg()
+        cfgs = []
+        for g in gpus:
+            _, is_ada = core_detector.CHIP_BY_PMC.get(g["die_name"], (0, False))
+            c = dict(base)
+            c.update({
+                "gpu_name": g["gpu_name"],
+                "die_name": g["die_name"],
+                "is_ada": is_ada,
+                "board_id_hex": g["board_id_hex"],
+                "subsystem_id_hex": g["subsystem_id_hex"],
+                "segment_hex": g["segment_hex"],
+                "bus_hex": g["bus_hex"],
+                "device_hex": g["device_hex"],
+                "function_hex": g["function_hex"],
+                "chip_id_hex": g["chip_id_hex"],
+                "vram_min_hex": g["vram_min_hex"],
+                "vram_max_hex": g["vram_max_hex"],
+            })
+            try:
+                core_detector.validate_target_profile(c)
+            except Exception as exc:
+                self.log(f"[SKIP] {g['gpu_name']} ({g['pci_bdf']}): {exc}")
+                continue
+            cfgs.append(c)
+        if len(cfgs) < 2:
+            raise ValueError(f"Multi-GPU mode needs at least 2 supported GPUs, found {len(cfgs)}")
+        return cfgs
+
     def _run_stage_job(self, target_path: str, target_mode: str) -> None:
         cfg = self._collect_profile_cfg()
+        multi_cfgs: list[dict[str, Any]] = []
+        try:
+            if self.var_multi_gpu.get():
+                multi_cfgs = self._collect_all_gpu_cfgs()
+        except Exception as exc:
+            messagebox.showerror("Invalid Profile", str(exc))
+            self.log(f"[ERROR] Multi-GPU profile validation failed: {exc}")
+            return
         try:
             validated_prof = core_detector.validate_target_profile(cfg)
             if not cfg.get("esp_guid") and validated_prof.get("esp_guid"):
@@ -961,7 +1071,10 @@ class UniversalUnlockApp(tk.Tk):
             try:
                 self.log("=" * 72)
                 self.log(f"[START] [v{core_detector.APP_VERSION}] Building UEFI bundle ({target_mode.upper()}) at {target_path} ...")
-                staged = core_detector.build_and_stage_usb(cfg, target_path, log_fn=self.log, target_mode=target_mode)
+                if multi_cfgs:
+                    staged = core_detector.build_and_stage_usb_multi(multi_cfgs, target_path, log_fn=self.log, target_mode=target_mode)
+                else:
+                    staged = core_detector.build_and_stage_usb(cfg, target_path, log_fn=self.log, target_mode=target_mode)
                 self.log(f"[SUCCESS] Bundle ready at {staged} (\\EFI\\Boot\\BOOTX64.EFI + \\GPU-UNLOCK\\ASSETS)")
                 self.log("=" * 72)
             except Exception as exc:
@@ -1007,6 +1120,173 @@ class UniversalUnlockApp(tk.Tk):
                 self.log(rep["text"])
             except Exception as exc:
                 self.log(f"[ERROR] Failed to read report: {exc}")
+            finally:
+                self.after(0, lambda: self._set_busy(False))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_internal_targets_ui(self) -> None:
+        if self.internal_targets:
+            vals = [t["display"] for t in self.internal_targets]
+            self.cb_internal_target["values"] = vals
+            if self.var_internal_target.get() not in vals:
+                self.var_internal_target.set(vals[0])
+        else:
+            self.cb_internal_target["values"] = []
+            self.var_internal_target.set("")
+        self._refresh_internal_boot_status()
+
+    def _refresh_internal_boot_status(self) -> None:
+        t = I18N[self.lang]
+        p = self.boot_prereq or {}
+        uefi_s = "OK" if p.get("is_uefi") else ("LEGACY" if p.get("is_uefi") is False else "?")
+        sb_s = "ON" if p.get("secure_boot") else ("OFF" if p.get("secure_boot") is False else "?")
+        bl_s = "ON" if p.get("bitlocker_on") else ("OFF" if p.get("bitlocker_state") == "off" else "?")
+        fb_s = "ON" if p.get("fast_startup_enabled") else ("OFF" if p.get("fast_startup_enabled") is False else "?")
+        if p.get("attempt_flag_active"):
+            ent_s = "GUARDED (ATTEMPT.FLG)"
+            fg_col = FG_AMBER
+        elif p.get("installed"):
+            ent_s = "#1 AUTO" if p.get("is_first_boot") else ("BOOTNEXT" if p.get("in_bootsequence") else "MANUAL")
+            fg_col = FG_GREEN
+        else:
+            ent_s = "NONE"
+            fg_col = FG_MUTED
+        self.lbl_internal_status.configure(
+            text=t["internal_status_tpl"].format(uefi=uefi_s, sb=sb_s, bl=bl_s, fb=fb_s, ent=ent_s),
+            fg=fg_col,
+        )
+
+    def _ensure_admin_for_bcd(self) -> bool:
+        if core_detector.is_windows_admin():
+            return True
+        t = I18N[self.lang]
+        if messagebox.askyesno(t["err_need_admin_title"], t["err_need_admin_msg"]):
+            if core_detector.relaunch_as_admin():
+                self.destroy()
+        return False
+
+    def action_relaunch_admin(self) -> None:
+        if core_detector.is_windows_admin():
+            self.log("[INFO] Console is already running with Administrator privileges.")
+            return
+        if core_detector.relaunch_as_admin():
+            self.destroy()
+        else:
+            self.log("[ERROR] Failed to elevate privileges via UAC.")
+
+    def action_install_internal_boot(self) -> None:
+        if self.busy:
+            return
+        if not self._ensure_admin_for_bcd():
+            return
+        t = I18N[self.lang]
+        sel_disp = self.var_internal_target.get().strip()
+        target = next((x for x in self.internal_targets if x["display"] == sel_disp), None)
+        if not target:
+            messagebox.showerror("Internal FAT32", t["err_no_internal_target"])
+            self.log(f"[WARN] {t['err_no_internal_target']}")
+            return
+
+        prereq = core_detector.check_windows_boot_prerequisites()
+        if prereq.get("secure_boot"):
+            if not messagebox.askyesno(t["warn_secureboot_title"], t["warn_secureboot_msg"]):
+                return
+        suspend_bl = False
+        if prereq.get("bitlocker_on"):
+            if messagebox.askyesno(t["warn_bitlocker_title"], t["warn_bitlocker_msg"]):
+                suspend_bl = True
+
+        if not messagebox.askyesno(
+            t["confirm_install_internal_title"],
+            t["confirm_install_internal_msg"].format(target=target["letter"]),
+        ):
+            return
+
+        cfg = self._collect_profile_cfg()
+        self._set_busy(True)
+
+        def _worker() -> None:
+            try:
+                if suspend_bl:
+                    core_detector.suspend_bitlocker_for_reboot("C:", 1)
+                    self.log("[OK] Suspended BitLocker protection for 1 reboot.")
+                if prereq.get("fast_startup_enabled"):
+                    core_detector.disable_windows_fast_startup()
+                    self.log("[OK] Disabled Windows Fast Startup (HiberbootEnabled=0) for reliable cold-boot unlock.")
+                res = core_detector.install_internal_boot_unlock(cfg, target, boot_mode="persistent", log_fn=self.log)
+                self.log(f"[SUCCESS] Internal auto-unlock installed on {res['target_letter']} (GUID={res['entry_guid']}).")
+                self.boot_prereq = core_detector.check_windows_boot_prerequisites()
+                self.after(0, self._refresh_internal_boot_status)
+            except Exception as exc:
+                self.log(f"[ERROR] Internal boot install failed: {exc}")
+            finally:
+                self.after(0, lambda: self._set_busy(False))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def action_oneshot_boot(self) -> None:
+        if self.busy:
+            return
+        if not self._ensure_admin_for_bcd():
+            return
+        t = I18N[self.lang]
+        prereq = core_detector.check_windows_boot_prerequisites()
+        if prereq.get("installed"):
+            self._set_busy(True)
+
+            def _worker() -> None:
+                try:
+                    core_detector.clear_internal_attempt_flag(log_fn=self.log)
+                    core_detector.trigger_oneshot_boot_unlock(log_fn=self.log)
+                    self.boot_prereq = core_detector.check_windows_boot_prerequisites()
+                    self.after(0, self._refresh_internal_boot_status)
+                except Exception as exc:
+                    self.log(f"[ERROR] One-shot BootNext failed: {exc}")
+                finally:
+                    self.after(0, lambda: self._set_busy(False))
+
+            threading.Thread(target=_worker, daemon=True).start()
+            return
+
+        sel_disp = self.var_internal_target.get().strip()
+        target = next((x for x in self.internal_targets if x["display"] == sel_disp), None)
+        if not target:
+            messagebox.showerror("Internal FAT32", t["err_no_internal_target"])
+            return
+        cfg = self._collect_profile_cfg()
+        self._set_busy(True)
+
+        def _worker_install_oneshot() -> None:
+            try:
+                res = core_detector.install_internal_boot_unlock(cfg, target, boot_mode="oneshot", log_fn=self.log)
+                self.log(f"[SUCCESS] One-shot BootNext armed on {res['target_letter']} (GUID={res['entry_guid']}).")
+                self.boot_prereq = core_detector.check_windows_boot_prerequisites()
+                self.after(0, self._refresh_internal_boot_status)
+            except Exception as exc:
+                self.log(f"[ERROR] One-shot setup failed: {exc}")
+            finally:
+                self.after(0, lambda: self._set_busy(False))
+
+        threading.Thread(target=_worker_install_oneshot, daemon=True).start()
+
+    def action_uninstall_internal_boot(self) -> None:
+        if self.busy:
+            return
+        if not self._ensure_admin_for_bcd():
+            return
+        t = I18N[self.lang]
+        if not messagebox.askyesno(t["confirm_uninstall_internal_title"], t["confirm_uninstall_internal_msg"]):
+            return
+        self._set_busy(True)
+
+        def _worker() -> None:
+            try:
+                core_detector.uninstall_internal_boot_unlock(log_fn=self.log)
+                self.boot_prereq = core_detector.check_windows_boot_prerequisites()
+                self.after(0, self._refresh_internal_boot_status)
+            except Exception as exc:
+                self.log(f"[ERROR] Uninstall failed: {exc}")
             finally:
                 self.after(0, lambda: self._set_busy(False))
 

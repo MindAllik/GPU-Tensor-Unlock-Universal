@@ -36,7 +36,7 @@ def get_app_version() -> str:
         m = re.search(r"\*\*Version:\s*([0-9]+\.[0-9]+\.[0-9]+)\*\*", readme.read_text(encoding="utf-8", errors="replace"))
         if m:
             return m.group(1)
-    return "1.3.2"
+    return "1.3.3"
 
 
 APP_VERSION: str = get_app_version()
@@ -526,6 +526,12 @@ def verify_compiled_efi_profile(efi_bytes: bytes, validated: dict[str, Any]) -> 
             raise RuntimeError(
                 f"Compiled BOOTX64.EFI does not contain target KOH_WINDOWS_ESP_GUID {validated['esp_guid']}!"
             )
+    if validated.get("payload_esp_guid") and validated["payload_esp_guid"] != "AUTO":
+        pay_bytes = guid_string_to_packed_bytes(validated["payload_esp_guid"])
+        if pay_bytes not in efi_bytes:
+            raise RuntimeError(
+                f"Compiled BOOTX64.EFI does not contain target KOH_PAYLOAD_ESP_GUID {validated['payload_esp_guid']}!"
+            )
     if (validated['board_id'], validated['subsys_id']) != (0x278210DE, 0xF2941569):
         if struct.pack("<I", 0xF2941569) in efi_bytes:
             raise RuntimeError(
@@ -616,20 +622,31 @@ def validate_target_profile(config: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             pass
 
+    payload_guid_raw = str(config.get("payload_esp_guid", "") or "").strip()
     if not esp_guid_raw or esp_guid_raw.upper() == "AUTO":
         esp_guid = "AUTO"
         esp_macro = "0x00000000U,0x0000U,0x0000U,{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}"
         esp_part = 0
-        payload_macro = "0x00000001U,0x0000U,0x0000U,{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}"
+        if payload_guid_raw and payload_guid_raw.upper() != "AUTO":
+            payload_esp_guid = payload_guid_raw
+            payload_macro = guid_string_to_c_macro(payload_esp_guid)
+        else:
+            payload_esp_guid = "AUTO"
+            payload_macro = "0x00000001U,0x0000U,0x0000U,{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}"
     else:
         esp_guid = esp_guid_raw
         esp_macro = guid_string_to_c_macro(esp_guid)
         esp_part = _parse_hex_int(config.get("esp_part_num", 0), "esp_part_num", 0, 128)
-        clean_guid = esp_guid.strip("{}").replace("-", "")
-        first_dword = int(clean_guid[0:8], 16) ^ 1
-        payload_macro = guid_string_to_c_macro(
-            f"{{{first_dword:08x}-{clean_guid[8:12]}-{clean_guid[12:16]}-{clean_guid[16:20]}-{clean_guid[20:32]}}}"
-        )
+        if payload_guid_raw and payload_guid_raw.upper() != "AUTO":
+            payload_esp_guid = payload_guid_raw
+            payload_macro = guid_string_to_c_macro(payload_esp_guid)
+        else:
+            payload_esp_guid = "AUTO"
+            clean_guid = esp_guid.strip("{}").replace("-", "")
+            first_dword = int(clean_guid[0:8], 16) ^ 1
+            payload_macro = guid_string_to_c_macro(
+                f"{{{first_dword:08x}-{clean_guid[8:12]}-{clean_guid[12:16]}-{clean_guid[16:20]}-{clean_guid[20:32]}}}"
+            )
 
     prom_sha = str(config.get("prom_sha256", "AUTO") or "AUTO").strip()
     rom_sha = str(config.get("rom_sha256", "AUTO") or "AUTO").strip()
@@ -637,6 +654,10 @@ def validate_target_profile(config: dict[str, Any]) -> dict[str, Any]:
         if not re.fullmatch(r"(AUTO|[0-9a-fA-F]{64})", val):
             raise ValueError(f"Invalid {label}: must be 'AUTO' or 64-char hex SHA-256")
 
+    internal_disk_mode = 1 if bool(config.get("internal_disk_mode", False)) else 0
+    default_confirm_ms = 5000 if internal_disk_mode else 30000
+    raw_confirm = config.get("autoconfirm_ms")
+    autoconfirm_ms = _parse_hex_int(raw_confirm, "autoconfirm_ms", 1000, 60000) if raw_confirm is not None else default_confirm_ms
     unattended = 1 if bool(config.get("unattended_autofire", True)) else 0
 
     return {
@@ -658,10 +679,13 @@ def validate_target_profile(config: dict[str, Any]) -> dict[str, Any]:
         "esp_guid": esp_guid,
         "esp_macro": esp_macro,
         "esp_part": esp_part,
+        "payload_esp_guid": payload_esp_guid,
         "payload_macro": payload_macro,
         "prom_sha": prom_sha if prom_sha == "AUTO" else prom_sha.lower(),
         "rom_sha": rom_sha if rom_sha == "AUTO" else rom_sha.lower(),
         "unattended": unattended,
+        "internal_disk_mode": internal_disk_mode,
+        "autoconfirm_ms": autoconfirm_ms,
     }
 
 
@@ -3180,8 +3204,14 @@ def build_and_stage_usb(
     usb_out: str | Path,
     log_fn: Callable[[str], None] = print,
     target_mode: str = "usb",
+    chain_next: int = 0,
+    stage_num: int = 1,
 ) -> Path:
-    """Validate profile, compile BOOTX64.EFI in an isolated build dir, and stage onto USB or export folder."""
+    """Validate profile, compile BOOTX64.EFI in an isolated build dir, and stage onto USB or export folder.
+
+    Multi-GPU chain: stage_num=1 is EFI/Boot/BOOTX64.EFI; stage_num=k>=2 is GPU-UNLOCK/STAGE<k>.EFI.
+    chain_next=k makes this build start STAGE<k>.EFI instead of Windows (0 = start Windows).
+    """
     if target_mode not in ("usb", "export"):
         raise ValueError(f"Invalid target_mode: {target_mode!r} (must be 'usb' or 'export')")
 
@@ -3373,8 +3403,9 @@ def build_and_stage_usb(
 #define KOH_WINDOWS_ESP_GUID {validated['esp_macro']}
 #define KOH_WINDOWS_ESP_PART {validated['esp_part']}U
 #define KOH_PAYLOAD_ESP_GUID {validated['payload_macro']}
-#define KOH_AUTOCONFIRM_MS 30000
+#define KOH_AUTOCONFIRM_MS {validated['autoconfirm_ms']}
 #define KOH_UNATTENDED_AUTOFIRE {validated['unattended']}
+#define KOH_INTERNAL_DISK_MODE {validated['internal_disk_mode']}
 """
         prom_profile_text = f"""#ifndef GU_PROM_PROFILE_H
 #define GU_PROM_PROFILE_H
@@ -3400,6 +3431,7 @@ def build_and_stage_usb(
                 "--linker",
                 lld_bin,
                 "--enable-experiment",
+                *(["--chain-next", str(chain_next)] if chain_next else []),
                 "--profile-dir",
                 str(prof_dir),
                 "--build-dir",
@@ -3451,6 +3483,14 @@ def build_and_stage_usb(
             log_fn(f"[USB] Writing {gsp_fname} ({exp_gsp_sz / (1024 * 1024):.1f} MB) to target drive (may take 10-30s on FAT32)...")
             _write_verified_file(gsp_dest, cached_gsp.read_bytes(), exp_gsp_sha)
             log_fn(f"[OK] Staged & verified {gsp_fname} ({exp_gsp_sz:,} bytes)")
+
+        if stage_num >= 2:
+            stage2_dir = usb_root / "GPU-UNLOCK"
+            stage2_dir.mkdir(parents=True, exist_ok=True)
+            stage2_efi = stage2_dir / f"STAGE{stage_num}.EFI"
+            _write_verified_file(stage2_efi, efi_bytes, efi_sha)
+            log_fn(f"[OK] Published {stage2_efi} ({len(efi_bytes)} bytes, SHA256={efi_sha[:16]}...)")
+            return usb_root
 
         # Backup any pre-existing foreign BOOTX64.EFI and verify backup SHA-256 even if backup file already exists!
         journal_path = usb_root / "GPU-UNLOCK" / "INSTALL_JOURNAL.JSON"
@@ -3506,6 +3546,37 @@ def build_and_stage_usb(
         _write_verified_file(journal_path, journal_bytes, sha256_bytes(journal_bytes))
         log_fn(f"[OK] Published {target_efi} ({len(efi_bytes)} bytes, SHA256={efi_sha[:16]}...)")
         return usb_root
+
+
+def build_and_stage_usb_multi(
+    configs: list[dict[str, Any]],
+    usb_out: str | Path,
+    log_fn: Callable[[str], None] = print,
+    target_mode: str = "usb",
+) -> Path:
+    """Stage an unlock chain for N GPUs: BOOTX64.EFI (card 1) -> STAGE2.EFI (card 2) -> ... -> Windows."""
+    n = len(configs)
+    if n == 1:
+        return build_and_stage_usb(configs[0], usb_out, log_fn=log_fn, target_mode=target_mode)
+    if not 2 <= n <= 8:
+        raise ValueError("Between 1 and 8 GPU profiles are supported")
+    keys = [(c.get("segment_hex"), c.get("bus_hex"), c.get("device_hex"), c.get("function_hex")) for c in configs]
+    if len(set(keys)) != n:
+        raise ValueError("Two profiles point to the same PCI address")
+    # Build the tail of the chain first so a failure leaves no half-chained BOOTX64.EFI on the target.
+    root: Path | None = None
+    for idx in range(n - 1, -1, -1):
+        log_fn(f"[MULTI] Building stage {idx + 1}/{n}: {configs[idx].get('gpu_name', '?')}")
+        root = build_and_stage_usb(
+            configs[idx],
+            usb_out,
+            log_fn=log_fn,
+            target_mode=target_mode,
+            chain_next=(idx + 2 if idx < n - 1 else 0),
+            stage_num=idx + 1,
+        )
+    assert root is not None
+    return root
 
 
 def read_latest_usb_report(usb_out: str | Path, expected_profile: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -3649,6 +3720,596 @@ def read_latest_usb_report(usb_out: str | Path, expected_profile: dict[str, Any]
         "ss1_line": ss1_line,
         "text": text,
     }
+
+
+INTERNAL_BOOT_ENTRY_DESC = "GPU Tensor Unlock"
+INTERNAL_BOOT_EFI_REL = r"\EFI\GPU-UNLOCK\unlockx64.efi"
+
+
+def _internal_boot_state_dir() -> Path:
+    base = os.environ.get("LOCALAPPDATA")
+    if base:
+        return Path(base) / "GPU-Tensor-Unlock"
+    return Path.home() / ".local" / "share" / "GPU-Tensor-Unlock"
+
+
+def _internal_boot_manifest_path() -> Path:
+    return _internal_boot_state_dir() / "internal_boot_manifest.json"
+
+
+def is_windows_admin() -> bool:
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def relaunch_as_admin() -> bool:
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        params = " ".join(f'"{arg}"' for arg in sys.argv)
+        rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, str(APP_ROOT), 1)
+        return int(rc) > 32
+    except Exception:
+        return False
+
+
+def parse_bcdedit_fwbootmgr(raw_text: str) -> dict[str, Any]:
+    """Language-independent parser for `bcdedit /enum {fwbootmgr}` output."""
+    guid_re = re.compile(r"\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}")
+    displayorder: list[str] = []
+    bootsequence: list[str] = []
+    timeout: int | None = None
+    section = None
+    for raw_ln in raw_text.splitlines():
+        ln = raw_ln.strip()
+        if not ln or ln.startswith("-"):
+            continue
+        low = ln.lower()
+        if low.startswith(("displayorder", "порядок", "显示顺序")):
+            section = "displayorder"
+        elif low.startswith(("bootsequence", "последовательность", "启动顺序")):
+            section = "bootsequence"
+        elif low.startswith(("timeout", "время", "超时")):
+            section = None
+            m_t = re.search(r"(\d+)", ln)
+            if m_t:
+                timeout = int(m_t.group(1))
+            continue
+        elif not ln.startswith("{") and len(ln.split()) >= 2 and not guid_re.match(ln):
+            # Another BCD attribute header
+            if "{fwbootmgr}" not in low:
+                section = None
+        guids = [g.lower() for g in guid_re.findall(ln)]
+        if guids:
+            if section == "displayorder":
+                for g in guids:
+                    if g not in displayorder:
+                        displayorder.append(g)
+            elif section == "bootsequence":
+                for g in guids:
+                    if g not in bootsequence:
+                        bootsequence.append(g)
+    return {
+        "displayorder": displayorder,
+        "bootsequence": bootsequence,
+        "timeout": timeout,
+    }
+
+
+def parse_bcdedit_unlock_entries(raw_all_text: str) -> list[dict[str, str]]:
+    """Language-independent search for GPU Tensor Unlock entries in `bcdedit /enum all`."""
+    guid_re = re.compile(r"\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}")
+    blocks = re.split(r"(?m)^-{5,}.*$", raw_all_text)
+    entries: list[dict[str, str]] = []
+    for blk in blocks:
+        if INTERNAL_BOOT_ENTRY_DESC.lower() not in blk.lower() and "unlockx64.efi" not in blk.lower():
+            continue
+        m_g = guid_re.search(blk)
+        if not m_g:
+            continue
+        entries.append({"guid": m_g.group(0).lower(), "raw": blk.strip()})
+    return entries
+
+
+def parse_manage_bde_status(raw_text: str) -> dict[str, Any]:
+    """Parse `manage-bde -status` output (EN/RU/ZH) for BitLocker protection status."""
+    low = raw_text.lower()
+    protection_on = any(
+        tok in low
+        for tok in (
+            "protection on",
+            "защита включена",
+            "保护已开启",
+            "fully encrypted",
+            "полностью зашифрован",
+        )
+    )
+    protection_off = any(
+        tok in low
+        for tok in (
+            "protection off",
+            "защита отключена",
+            "保护已关闭",
+            "fully decrypted",
+            "полностью расшифрован",
+        )
+    )
+    suspended = "0" in low and ("key protectors" not in low or protection_off)
+    if protection_on:
+        state = "on"
+    elif protection_off:
+        state = "off"
+    else:
+        state = "unknown"
+    return {"state": state, "protection_on": protection_on, "suspended_hint": suspended}
+
+
+def _find_free_drive_letter() -> str:
+    used = {f"{chr(c)}:" for c in range(ord("A"), ord("Z") + 1) if Path(f"{chr(c)}:\\").exists()}
+    for c in range(ord("Z"), ord("M"), -1):
+        cand = f"{chr(c)}:"
+        if cand not in used:
+            return cand
+    raise RuntimeError("No free drive letter available to temporarily mount EFI System Partition")
+
+
+def _mount_windows_esp_temp() -> tuple[str, bool]:
+    """Mount the Windows EFI System Partition to a free drive letter; returns (letter, mounted_by_us)."""
+    letter = _find_free_drive_letter()
+    res = subprocess.run(
+        ["mountvol", letter, "/S"],
+        capture_output=True,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if res.returncode != 0:
+        raise RuntimeError(f"Failed to mount Windows ESP via mountvol {letter} /S: {(res.stderr or res.stdout).strip()}")
+    return letter, True
+
+
+def _unmount_windows_esp_temp(letter: str) -> None:
+    if not letter:
+        return
+    subprocess.run(
+        ["mountvol", letter, "/D"],
+        capture_output=True,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+
+def _load_internal_boot_manifest() -> dict[str, Any] | None:
+    mp = _internal_boot_manifest_path()
+    if not mp.is_file():
+        return None
+    try:
+        data = json.loads(mp.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def check_windows_boot_prerequisites() -> dict[str, Any]:
+    """Inspect UEFI mode, admin privileges, Secure Boot, BitLocker, Fast Startup, and existing {fwbootmgr} entry."""
+    info: dict[str, Any] = {
+        "is_windows": sys.platform.startswith("win"),
+        "is_admin": is_windows_admin(),
+        "is_uefi": None,
+        "secure_boot": None,
+        "bitlocker_on": False,
+        "bitlocker_state": "unknown",
+        "fast_startup_enabled": None,
+        "installed": False,
+        "entry_guid": None,
+        "in_displayorder": False,
+        "is_first_boot": False,
+        "in_bootsequence": False,
+        "attempt_flag_active": False,
+        "manifest": _load_internal_boot_manifest(),
+    }
+    if not sys.platform.startswith("win"):
+        return info
+
+    # 1. UEFI firmware check via GetFirmwareType (2 == FirmwareTypeUefi)
+    try:
+        fw_type = ctypes.c_uint(0)
+        if ctypes.windll.kernel32.GetFirmwareType(ctypes.byref(fw_type)):
+            info["is_uefi"] = (fw_type.value == 2)
+    except Exception:
+        pass
+
+    # 2. Secure Boot state via registry (works without admin)
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\SecureBoot\State") as k:
+            val, _ = winreg.QueryValueEx(k, "UEFISecureBootEnabled")
+            info["secure_boot"] = bool(int(val) != 0)
+    except Exception:
+        pass
+
+    # 3. Fast Startup state via registry (works without admin)
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Power") as k:
+            val, _ = winreg.QueryValueEx(k, "HiberbootEnabled")
+            info["fast_startup_enabled"] = bool(int(val) != 0)
+    except Exception:
+        pass
+
+    # 4. BitLocker status (PowerShell Get-BitLockerVolume first, fallback manage-bde)
+    sys_drive = os.environ.get("SystemDrive", "C:")
+    try:
+        ps = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", f"(Get-BitLockerVolume -MountPoint '{sys_drive}').ProtectionStatus"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        out = (ps.stdout or "").strip().lower()
+        if out in ("on", "1"):
+            info["bitlocker_on"] = True
+            info["bitlocker_state"] = "on"
+        elif out in ("off", "0"):
+            info["bitlocker_on"] = False
+            info["bitlocker_state"] = "off"
+    except Exception:
+        pass
+
+    if info["bitlocker_state"] == "unknown" and info["is_admin"]:
+        try:
+            mb = subprocess.run(
+                ["manage-bde", "-status", sys_drive],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            parsed_mb = parse_manage_bde_status(mb.stdout or "")
+            info["bitlocker_on"] = parsed_mb["protection_on"]
+            info["bitlocker_state"] = parsed_mb["state"]
+        except Exception:
+            pass
+
+    # 5. bcdedit {fwbootmgr} status (requires admin)
+    if info["is_admin"]:
+        try:
+            r_fw = subprocess.run(
+                ["bcdedit", "/enum", "{fwbootmgr}"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            fw_parsed = parse_bcdedit_fwbootmgr(r_fw.stdout or "")
+            r_all = subprocess.run(
+                ["bcdedit", "/enum", "all"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            found_entries = parse_bcdedit_unlock_entries(r_all.stdout or "")
+            manifest_guid = ((info.get("manifest") or {}).get("entry_guid") or "").lower()
+            active_guid = manifest_guid if manifest_guid else (found_entries[0]["guid"] if found_entries else None)
+            if active_guid and any(e["guid"] == active_guid for e in found_entries):
+                info["installed"] = True
+                info["entry_guid"] = active_guid
+                order = fw_parsed["displayorder"]
+                info["in_displayorder"] = active_guid in order
+                info["is_first_boot"] = bool(order and order[0] == active_guid)
+                info["in_bootsequence"] = active_guid in fw_parsed["bootsequence"]
+        except Exception:
+            pass
+
+    # 6. ATTEMPT.FLG check if manifest knows payload drive
+    man = info.get("manifest") or {}
+    pay_root = man.get("payload_root")
+    if pay_root and Path(pay_root).exists():
+        info["attempt_flag_active"] = (Path(pay_root) / "GPU-UNLOCK" / "ATTEMPT.FLG").exists()
+
+    return info
+
+
+def list_internal_boot_targets() -> list[dict[str, Any]]:
+    """Discover safe internal FAT32 volumes (dedicated partitions or spacious ESPs) for USB-less unlock."""
+    if not sys.platform.startswith("win"):
+        return []
+    targets: list[dict[str, Any]] = []
+    esp_guids = {e.get("Guid", "").lower(): e for e in _detect_windows_esp_win32() if e.get("Guid")}
+
+    # Query mounted fixed FAT32 volumes via PowerShell Get-Volume + Get-Partition
+    ps_script = (
+        "$vols = Get-Volume | Where-Object { $_.DriveType -eq 'Fixed' -and $_.FileSystem -eq 'FAT32' -and $_.Size -ge 150MB }; "
+        "$out = @(); "
+        "foreach ($v in $vols) { "
+        "  $p = Get-Partition -Volume $v -ErrorAction SilentlyContinue | Select-Object -First 1; "
+        "  if ($null -ne $p) { "
+        "    $out += [PSCustomObject]@{ "
+        "      Letter = if ($v.DriveLetter) { ($v.DriveLetter + ':') } else { '' }; "
+        "      Label = [string]$v.FileSystemLabel; "
+        "      SizeMB = [int64]($v.Size / 1MB); "
+        "      FreeMB = [int64]($v.SizeRemaining / 1MB); "
+        "      Guid = [string]$p.Guid; "
+        "      DiskNumber = [int]$p.DiskNumber; "
+        "      PartitionNumber = [int]$p.PartitionNumber; "
+        "      GptType = [string]$p.GptType; "
+        "    } "
+        "  } "
+        "}; "
+        "$out | ConvertTo-Json -Compress"
+    )
+    try:
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        raw = (res.stdout or "").strip()
+        if raw:
+            parsed = json.loads(raw)
+            items = parsed if isinstance(parsed, list) else [parsed]
+            for it in items:
+                guid = str(it.get("Guid") or "").strip()
+                gpt_type = str(it.get("GptType") or "").lower()
+                is_esp = (guid.lower() in esp_guids) or ("c12a7328-f81f-11d2-ba4b-00a0c93ec93b" in gpt_type)
+                free_mb = int(it.get("FreeMB") or 0)
+                if is_esp and free_mb < 220:
+                    continue
+                letter = str(it.get("Letter") or "").strip()
+                if not letter:
+                    continue
+                mode_tag = "esp_single" if is_esp else "dedicated_fat32"
+                label = str(it.get("Label") or ("Windows ESP" if is_esp else "FAT32"))
+                targets.append({
+                    "mode": mode_tag,
+                    "letter": letter,
+                    "guid": guid,
+                    "label": label,
+                    "size_mb": int(it.get("SizeMB") or 0),
+                    "free_mb": free_mb,
+                    "disk_number": int(it.get("DiskNumber") or 0),
+                    "partition_number": int(it.get("PartitionNumber") or 0),
+                    "display": f"{letter} [{label}] ({free_mb} MB free / {int(it.get('SizeMB') or 0)} MB) - {'Large ESP' if is_esp else 'Dedicated FAT32 (Recommended)'}",
+                })
+    except Exception:
+        pass
+    return targets
+
+
+def disable_windows_fast_startup() -> bool:
+    if not sys.platform.startswith("win"):
+        return False
+    import winreg
+    with winreg.OpenKey(
+        winreg.HKEY_LOCAL_MACHINE,
+        r"SYSTEM\CurrentControlSet\Control\Session Manager\Power",
+        0,
+        winreg.KEY_SET_VALUE,
+    ) as k:
+        winreg.SetValueEx(k, "HiberbootEnabled", 0, winreg.REG_DWORD, 0)
+    return True
+
+
+def suspend_bitlocker_for_reboot(drive: str = "C:", reboot_count: int = 1) -> None:
+    if not sys.platform.startswith("win"):
+        raise RuntimeError("BitLocker management is only available on Windows")
+    res = subprocess.run(
+        ["manage-bde", "-protectors", "-disable", drive, "-RebootCount", str(max(1, int(reboot_count)))],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if res.returncode != 0:
+        raise RuntimeError(f"manage-bde suspend failed: {(res.stderr or res.stdout).strip()}")
+
+
+def install_internal_boot_unlock(
+    config: dict[str, Any],
+    target_info: dict[str, Any],
+    boot_mode: str = "persistent",
+    log_fn: Callable[[str], None] = print,
+) -> dict[str, Any]:
+    """Build KOH_INTERNAL_DISK_MODE=1 EFI, stage assets onto an internal FAT32 volume, and register {fwbootmgr}."""
+    if not sys.platform.startswith("win"):
+        raise RuntimeError("Internal disk boot installation is only supported on Windows")
+    if not is_windows_admin():
+        raise PermissionError("Administrator privileges are required to register UEFI boot entries (bcdedit).")
+    if boot_mode not in ("persistent", "oneshot"):
+        raise ValueError(f"Invalid boot_mode: {boot_mode!r}")
+
+    prereq = check_windows_boot_prerequisites()
+    if prereq.get("is_uefi") is False:
+        raise RuntimeError("System is booted in Legacy BIOS/CSM mode; UEFI GPT boot is required.")
+
+    target_letter = str(target_info.get("letter") or "").strip().rstrip("\\/")
+    if not target_letter or target_letter.upper() == "C:":
+        raise ValueError("Refusing to target C: directly; select a dedicated FAT32 partition or spacious ESP.")
+
+    state_dir = _internal_boot_state_dir()
+    state_dir.mkdir(parents=True, exist_ok=True)
+    backup_bcd = state_dir / f"bcd_backup_{time.strftime('%Y%m%d_%H%M%S')}.bcd"
+    r_exp = subprocess.run(
+        ["bcdedit", "/export", str(backup_bcd)],
+        capture_output=True,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if r_exp.returncode != 0:
+        raise RuntimeError(f"BCD backup failed: {(r_exp.stderr or r_exp.stdout).strip()}")
+    log_fn(f"[BACKUP] Exported BCD store backup to {backup_bcd}")
+
+    cfg = dict(config)
+    cfg["internal_disk_mode"] = True
+    cfg.setdefault("autoconfirm_ms", 5000)
+    if target_info.get("guid"):
+        cfg["payload_esp_guid"] = target_info["guid"]
+
+    staged_root = build_and_stage_usb(cfg, f"{target_letter}\\", log_fn=log_fn, target_mode="export")
+
+    # Copy staged BOOTX64.EFI also to \EFI\GPU-UNLOCK\unlockx64.efi so Windows stock \EFI\Boot\BOOTX64.EFI is untouched
+    src_efi = staged_root / "EFI" / "Boot" / "BOOTX64.EFI"
+    efi_bytes = src_efi.read_bytes()
+    efi_sha = sha256_bytes(efi_bytes)
+    unlock_efi = staged_root / "EFI" / "GPU-UNLOCK" / "unlockx64.efi"
+    unlock_efi.parent.mkdir(parents=True, exist_ok=True)
+    _write_verified_file(unlock_efi, efi_bytes, efi_sha)
+
+    # Clear any stale ATTEMPT.FLG before enabling
+    attempt_file = staged_root / "GPU-UNLOCK" / "ATTEMPT.FLG"
+    if attempt_file.exists():
+        attempt_file.unlink()
+
+    # Reuse existing entry GUID if present, otherwise /copy {bootmgr}
+    guid_re = re.compile(r"\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}")
+    existing_guid = prereq.get("entry_guid")
+    if not existing_guid:
+        r_copy = subprocess.run(
+            ["bcdedit", "/copy", "{bootmgr}", "/d", INTERNAL_BOOT_ENTRY_DESC],
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        m_g = guid_re.search((r_copy.stdout or "") + " " + (r_copy.stderr or ""))
+        if r_copy.returncode != 0 or not m_g:
+            raise RuntimeError(f"bcdedit /copy {{bootmgr}} failed: {(r_copy.stderr or r_copy.stdout).strip()}")
+        existing_guid = m_g.group(0).lower()
+        log_fn(f"[BCD] Created UEFI firmware entry {existing_guid}")
+
+    for cmd in (
+        ["bcdedit", "/set", existing_guid, "device", f"partition={target_letter}"],
+        ["bcdedit", "/set", existing_guid, "path", INTERNAL_BOOT_EFI_REL],
+        ["bcdedit", "/set", existing_guid, "description", INTERNAL_BOOT_ENTRY_DESC],
+    ):
+        rc_cmd = subprocess.run(cmd, capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if rc_cmd.returncode != 0:
+            raise RuntimeError(f"Command {' '.join(cmd)} failed: {(rc_cmd.stderr or rc_cmd.stdout).strip()}")
+
+    if boot_mode == "persistent":
+        r_ord = subprocess.run(
+            ["bcdedit", "/set", "{fwbootmgr}", "displayorder", existing_guid, "/addfirst"],
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if r_ord.returncode != 0:
+            raise RuntimeError(f"Failed to set displayorder /addfirst: {(r_ord.stderr or r_ord.stdout).strip()}")
+        r_chk = subprocess.run(
+            ["bcdedit", "/enum", "{fwbootmgr}"],
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        parsed_fw = parse_bcdedit_fwbootmgr(r_chk.stdout or "")
+        is_first = bool(parsed_fw["displayorder"] and parsed_fw["displayorder"][0] == existing_guid)
+        if is_first:
+            log_fn(f"[OK] Verified {existing_guid} is now #1 in {{fwbootmgr}} displayorder (auto-unlock on every boot).")
+        else:
+            log_fn(f"[WARN] Added {existing_guid} to {{fwbootmgr}}, but firmware did not report it first. Some motherboards require moving '{INTERNAL_BOOT_ENTRY_DESC}' to #1 manually in BIOS Boot Order.")
+    else:
+        r_seq = subprocess.run(
+            ["bcdedit", "/set", "{fwbootmgr}", "bootsequence", existing_guid],
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if r_seq.returncode != 0:
+            raise RuntimeError(f"Failed to set bootsequence (BootNext): {(r_seq.stderr or r_seq.stdout).strip()}")
+        log_fn(f"[OK] Scheduled one-shot BootNext ({existing_guid}) for the next reboot.")
+
+    manifest = {
+        "schema_version": 1,
+        "app_version": APP_VERSION,
+        "entry_guid": existing_guid,
+        "boot_mode": boot_mode,
+        "target_letter": target_letter,
+        "payload_root": str(staged_root),
+        "payload_guid": target_info.get("guid") or "",
+        "efi_rel_path": INTERNAL_BOOT_EFI_REL,
+        "efi_sha256": efi_sha,
+        "bcd_backup": str(backup_bcd),
+    }
+    man_bytes = json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8")
+    _write_verified_file(_internal_boot_manifest_path(), man_bytes, sha256_bytes(man_bytes))
+    return manifest
+
+
+def trigger_oneshot_boot_unlock(log_fn: Callable[[str], None] = print) -> dict[str, Any]:
+    if not is_windows_admin():
+        raise PermissionError("Administrator privileges are required for bcdedit.")
+    prereq = check_windows_boot_prerequisites()
+    guid = prereq.get("entry_guid")
+    if not guid:
+        raise RuntimeError("No GPU Tensor Unlock UEFI entry found. Install onto an internal FAT32 volume first.")
+    res = subprocess.run(
+        ["bcdedit", "/set", "{fwbootmgr}", "bootsequence", guid],
+        capture_output=True,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if res.returncode != 0:
+        raise RuntimeError(f"bcdedit bootsequence failed: {(res.stderr or res.stdout).strip()}")
+    log_fn(f"[OK] One-shot BootNext set for {guid}. Reboot to run unlock once.")
+    return {"entry_guid": guid, "bootsequence_set": True}
+
+
+def clear_internal_attempt_flag(log_fn: Callable[[str], None] = print) -> bool:
+    man = _load_internal_boot_manifest()
+    if not man or not man.get("payload_root"):
+        return False
+    flg = Path(man["payload_root"]) / "GPU-UNLOCK" / "ATTEMPT.FLG"
+    if flg.exists():
+        flg.unlink()
+        log_fn(f"[OK] Cleared safeguard marker {flg}")
+        return True
+    log_fn("[INFO] No ATTEMPT.FLG safeguard marker present.")
+    return False
+
+
+def uninstall_internal_boot_unlock(log_fn: Callable[[str], None] = print) -> dict[str, Any]:
+    if not sys.platform.startswith("win"):
+        raise RuntimeError("Uninstall is only supported on Windows")
+    if not is_windows_admin():
+        raise PermissionError("Administrator privileges are required to remove UEFI boot entries.")
+
+    prereq = check_windows_boot_prerequisites()
+    removed_guids: list[str] = []
+    r_all = subprocess.run(
+        ["bcdedit", "/enum", "all"],
+        capture_output=True,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    for ent in parse_bcdedit_unlock_entries(r_all.stdout or ""):
+        g = ent["guid"]
+        subprocess.run(
+            ["bcdedit", "/delete", g],
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        removed_guids.append(g)
+        log_fn(f"[OK] Removed UEFI boot entry {g}")
+
+    man = _load_internal_boot_manifest()
+    if man and man.get("payload_root"):
+        proot = Path(man["payload_root"])
+        for sub in (proot / "EFI" / "GPU-UNLOCK", proot / "GPU-UNLOCK"):
+            if sub.exists() and not _is_reparse_or_symlink(sub):
+                shutil.rmtree(sub, ignore_errors=True)
+                log_fn(f"[OK] Cleaned staged directory {sub}")
+
+    mp = _internal_boot_manifest_path()
+    if mp.exists():
+        mp.unlink()
+    return {"removed_guids": removed_guids}
 
 
 def _readback_nvml_power_limit_watts(gpu_uuid: str) -> float | None:

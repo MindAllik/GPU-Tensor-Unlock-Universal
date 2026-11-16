@@ -53,7 +53,11 @@ static BOOLEAN DisplayCheck(VOID) {
   OTHER_DISPLAY snapshot[8];memset(snapshot,0,sizeof(snapshot));
   EFI_STATUS status=Gu.bs->LocateHandleBuffer(ByProtocol,&GopGuid,NULL,&count,&handles);
   if(status==EFI_NOT_FOUND && ExpectDetached)return OtherCount==0 && GuLogReady();
-  if(EFI_ERROR(status) || count>128 || (count && !handles)){if(handles)GuFree(handles);return FALSE;}
+  if(status==EFI_NOT_FOUND && (!DisplaysLatched || OtherCount==0)){count=0;handles=NULL;status=EFI_SUCCESS;}
+  if(EFI_ERROR(status) || count>128 || (count && !handles)){
+    GuLog("GOP LocateHandleBuffer failed: status=%#llx count=%zu\n",(unsigned long long)status,(size_t)count);
+    if(handles)GuFree(handles);return FALSE;
+  }
   for(UINTN i=0;i<count;i++) {
     EFI_GRAPHICS_OUTPUT_PROTOCOL *g=NULL;EFI_DEVICE_PATH_PROTOCOL *path=NULL;
     status=Gu.bs->HandleProtocol(handles[i],&GopGuid,(VOID **)&g);
@@ -590,7 +594,11 @@ EFI_STATUS EFIAPI EfiMain(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
   (void)Image;(void)St;return EFI_UNSUPPORTED;
 #endif
   if(!St || !St->BootServices || !St->RuntimeServices)return EFI_INVALID_PARAMETER;
-  WindowsImage=NULL;WindowsVolume=NULL;WindowsDevicePath=NULL;GuScreenDetached=FALSE;ExpectDetached=FALSE;PromDigestLatched=FALSE;LatchedPromSpanBytes=0;InitialTargetMatched=0;LatchedChip=0;InitialBootBme=FALSE;InitialBootCommand=0;InitialPciAttributes=0;
+  WindowsImage=NULL;WindowsVolume=NULL;
+#if defined(GU_CHAIN_STAGE2) && GU_CHAIN_STAGE2
+  Stage2Image=NULL;Stage2DevicePath=NULL;
+#endif
+  WindowsDevicePath=NULL;GuScreenDetached=FALSE;ExpectDetached=FALSE;PromDigestLatched=FALSE;LatchedPromSpanBytes=0;InitialTargetMatched=0;LatchedChip=0;InitialBootBme=FALSE;InitialBootCommand=0;InitialPciAttributes=0;
   DisplaysLatched=FALSE;OtherCount=0;memset(OtherDisplays,0,sizeof(OtherDisplays));
   Table=St;GuInit(St->BootServices,NULL);Gu.image=Image;Gu.display_check=DisplayCheck;Gu.verify_prom_span=GuVerifyPreparedPromSpan;
   memset(&PendingOwner,0,sizeof(PendingOwner));
@@ -615,6 +623,27 @@ EFI_STATUS EFIAPI EfiMain(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
   GuLog("boot policy: secure_boot=%u firmware_authentication_not_overridden=1\n",secure);
   status=Step(status);if(EFI_ERROR(status))goto finish;
   Stage="watchdog";status=Step(Gu.bs->SetWatchdogTimer(0,0,0,NULL));if(EFI_ERROR(status))goto finish;
+  if(KOH_INTERNAL_DISK_MODE && GuAttemptFlagPresent()) {
+    Stage="attempt-guard";
+    GuLogText("[SAFEGUARD] ATTEMPT.FLG found from an incomplete previous boot. Skipping unlock and booting Windows directly.\n");
+    GuLogText("Delete \\GPU-UNLOCK\\ATTEMPT.FLG or use the UI button after checking REPORT.TXT to re-enable auto-unlock.\n");
+    GuConsole("Press any key within 5s or wait to boot Windows...\n");
+    for(UINTN w=0;w<50 && Table->ConIn && Table->ConIn->ReadKeyStroke;w++) {
+      EFI_INPUT_KEY k;if(!EFI_ERROR(Table->ConIn->ReadKeyStroke(Table->ConIn,&k)))break;
+      Gu.bs->Stall(100000);
+    }
+    status=PreloadWindows();
+    if(!EFI_ERROR(status) && WindowsImage) {
+      GuIoClose();
+      UINTN bytes=0;CHAR16 *data=NULL;
+      status=Gu.bs->StartImage(WindowsImage,&bytes,&data);
+      if(data)GuFree(data);
+    }
+    if(WindowsImage)Gu.bs->UnloadImage(WindowsImage);
+    GuFree(WindowsDevicePath);WindowsDevicePath=NULL;
+    GuIoClose();
+    return status;
+  }
   Stage="target";status=Step(FindTarget());if(EFI_ERROR(status))goto finish;
   EFI_STATUS preflight_error=EFI_SUCCESS;const char *failed_stage=NULL;
 #define COLLECT() do { status=Step(status); if(EFI_ERROR(status) && !EFI_ERROR(preflight_error)) { preflight_error=status;failed_stage=Stage; } } while(0)
@@ -637,6 +666,9 @@ EFI_STATUS EFIAPI EfiMain(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
   } else GuLogText("SKIP cold-state/PROM: valid BAR access prerequisite unavailable\n");
   Stage="assets";status=GuLoadAssets();COLLECT();
   Stage="windows-preload";status=PreloadWindows();COLLECT();
+#if defined(GU_CHAIN_STAGE2) && GU_CHAIN_STAGE2
+  Stage="stage2-preload";status=PreloadStage2();COLLECT();
+#endif
   if(EFI_ERROR(preflight_error)) {
     GuLogText("All independent preflight checks completed; no driver release or firmware execution.\n");
     status=preflight_error;Stage=failed_stage;goto finish;
@@ -646,6 +678,9 @@ EFI_STATUS EFIAPI EfiMain(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
   Stage="armed-config";status=Step(ConfigCheck(FALSE));if(EFI_ERROR(status))goto finish;
   Stage="armed-display";Gu.display_ok=DisplayCheck();status=Step(Gu.display_ok?EFI_SUCCESS:EFI_UNSUPPORTED);if(EFI_ERROR(status))goto finish;
   Stage="armed-cold-state";status=Step(ColdCheck());if(EFI_ERROR(status))goto finish;
+  if(KOH_INTERNAL_DISK_MODE) {
+    Stage="attempt-flag";status=Step(GuAttemptFlagSet());if(EFI_ERROR(status))goto finish;
+  }
   if(PendingOwner.agent) {
     GU_RELEASE_OWNER current;
     Stage="owner-recheck";
@@ -719,7 +754,10 @@ finish:
     } else if(already_exclusive) {
       Stage="post-unlock-handoff";status=VerifySelectors("POST-FLR");
     }
-    if(!EFI_ERROR(status))GuLogText("HANDOFF_STATE stage=handoff_prepared\n");
+    if(!EFI_ERROR(status)) {
+      if(KOH_INTERNAL_DISK_MODE)GuAttemptFlagClear();
+      GuLogText("HANDOFF_STATE stage=handoff_prepared\n");
+    }
   }
   if(release_attempted && (EFI_ERROR(status) || Gu.fault))ReleaseHalt(status,attempted);
   if(attempted && !GuSafeToReturn())Halt();
@@ -737,13 +775,32 @@ finish:
   if(!EFI_ERROR(status) && attempted) {
     GuConsole("GPU restored after FLR and GOP reconnect; selector outcome logged. Starting Windows.\n");
     UINTN bytes=0;CHAR16 *data=NULL;
+#if defined(GU_CHAIN_STAGE2) && GU_CHAIN_STAGE2
+    GuConsole("Chaining to next GPU unlock stage.\n");
+    if(WindowsImage){Gu.bs->UnloadImage(WindowsImage);WindowsImage=NULL;}
+    status=Gu.bs->StartImage(Stage2Image,&bytes,&data);
+#else
     status=Gu.bs->StartImage(WindowsImage,&bytes,&data);
+#endif
     if(data)GuFree(data);
     /* Returning after a hardware attempt could permit accidental rerun. */
     GuScreenDetached=TRUE;Halt();
   }
   else GuConsole("Attempt cancelled or rejected. Returning without another attempt.\n");
+  if(KOH_INTERNAL_DISK_MODE && !attempted && !Gu.started && !release_attempted && !WindowsImage) {
+    PreloadWindows();
+  }
+  if(KOH_INTERNAL_DISK_MODE && !attempted && !Gu.started && !release_attempted && WindowsImage) {
+    GuConsole("Internal-disk mode: booting Windows normally without GPU unlock.\n");
+    UINTN bytes=0;CHAR16 *data=NULL;
+    Gu.bs->StartImage(WindowsImage,&bytes,&data);
+    if(data)GuFree(data);
+  }
   if(WindowsImage)Gu.bs->UnloadImage(WindowsImage);
+#if defined(GU_CHAIN_STAGE2) && GU_CHAIN_STAGE2
+  if(Stage2Image)Gu.bs->UnloadImage(Stage2Image);
+  GuFree(Stage2DevicePath);Stage2DevicePath=NULL;
+#endif
   GuFree(WindowsDevicePath);WindowsDevicePath=NULL;
   if(EFI_ERROR(status) && status!=EFI_ABORTED && status!=EFI_TIMEOUT && !release_attempted)PausePreflightFailure();
   return status;

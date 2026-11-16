@@ -349,6 +349,36 @@ EFI_STATUS GuLoadAssets(VOID) {
   }
   return EFI_SUCCESS;
 }
+BOOLEAN GuAttemptFlagPresent(VOID) {
+  if(!Parent)return FALSE;
+  EFI_FILE_PROTOCOL *f=NULL;
+  EFI_STATUS s=Parent->Open(Parent,&f,L"ATTEMPT.FLG",EFI_FILE_MODE_READ,0);
+  if(!EFI_ERROR(s) && f){f->Close(f);return TRUE;}
+  return FALSE;
+}
+EFI_STATUS GuAttemptFlagSet(VOID) {
+  if(!Parent)return EFI_NOT_READY;
+  EFI_FILE_PROTOCOL *f=NULL;
+  EFI_STATUS s=Parent->Open(Parent,&f,L"ATTEMPT.FLG",EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE|EFI_FILE_MODE_CREATE,0);
+  if(EFI_ERROR(s) || !f)return EFI_ERROR(s)?s:EFI_DEVICE_ERROR;
+  static const char msg[]="ARMED\n";
+  UINTN sz=sizeof(msg)-1;
+  s=f->Write(f,&sz,(VOID*)msg);
+  if(!EFI_ERROR(s))s=f->Flush(f);
+  EFI_STATUS cs=f->Close(f);
+  Parent->Flush(Parent);
+  return EFI_ERROR(s)?s:cs;
+}
+VOID GuAttemptFlagClear(VOID) {
+  if(!Parent)return;
+  EFI_FILE_PROTOCOL *f=NULL;
+  EFI_STATUS s=Parent->Open(Parent,&f,L"ATTEMPT.FLG",EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE,0);
+  if(!EFI_ERROR(s) && f) {
+    if(f->Delete)f->Delete(f);
+    else f->Close(f);
+  }
+  Parent->Flush(Parent);
+}
 VOID GuReleaseAssets(VOID) {
   if(!GuSafeToReturn())return;
   for(UINTN i=0;i<5;i++){GuFree((VOID *)GuAssets[i].firmware.data);memset(&GuAssets[i],0,sizeof(GuAssets[i]));}

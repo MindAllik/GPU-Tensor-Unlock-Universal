@@ -11,9 +11,9 @@ static EFI_GUID FsGuid=EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID,LoadedGuid=EFI_LOADE
 static const CHAR16 WindowsPath[]=L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi";
 static EFI_HANDLE WindowsImage,WindowsVolume;
 static EFI_DEVICE_PATH_PROTOCOL *WindowsDevicePath;
-static EFI_STATUS MakeWindowsPath(VOID) {
+static EFI_STATUS MakeFilePath(EFI_HANDLE Volume,const CHAR16 *Path,UINTN PathSize,EFI_DEVICE_PATH_PROTOCOL **Out) {
   EFI_DEVICE_PATH_PROTOCOL *base=NULL;
-  EFI_STATUS s=Gu.bs->HandleProtocol(WindowsVolume,&PathGuid,(VOID**)&base);
+  EFI_STATUS s=Gu.bs->HandleProtocol(Volume,&PathGuid,(VOID**)&base);
   if(EFI_ERROR(s)||!base)return EFI_NOT_FOUND;
   UINTN off=0;BOOLEAN end=FALSE;
   for(UINTN i=0;i<128 && off<=4092;i++) {
@@ -27,13 +27,54 @@ static EFI_STATUS MakeWindowsPath(VOID) {
     off+=len;
   }
   if(!end)return EFI_COMPROMISED_DATA;
-  UINTN node=4+sizeof(WindowsPath),total=off+node+4;
+  UINTN node=4+PathSize,total=off+node+4;
   UINT8 *b=GuAlloc(total);if(!b)return EFI_OUT_OF_RESOURCES;
   memcpy(b,base,off);b[off]=MEDIA_DEVICE_PATH;b[off+1]=MEDIA_FILEPATH_DP;
-  b[off+2]=(UINT8)node;b[off+3]=(UINT8)(node>>8);memcpy(b+off+4,WindowsPath,sizeof(WindowsPath));
+  b[off+2]=(UINT8)node;b[off+3]=(UINT8)(node>>8);memcpy(b+off+4,Path,PathSize);
   b[off+node]=END_DEVICE_PATH_TYPE;b[off+node+1]=END_ENTIRE_DEVICE_PATH_SUBTYPE;b[off+node+2]=4;
-  WindowsDevicePath=(VOID*)b;return EFI_SUCCESS;
+  *Out=(VOID*)b;return EFI_SUCCESS;
 }
+static EFI_STATUS MakeWindowsPath(VOID) {
+  return MakeFilePath(WindowsVolume,WindowsPath,sizeof(WindowsPath),&WindowsDevicePath);
+}
+#if defined(GU_CHAIN_STAGE2) && GU_CHAIN_STAGE2
+/* Multi-GPU chain: this build unlocks its own card, then starts the next
+   per-card BOOTX64 build (\GPU-UNLOCK\STAGE2.EFI on the boot volume) instead of
+   Windows. The last build in the chain starts Windows as usual. */
+#ifndef GU_NEXT_STAGE_NUM
+#define GU_NEXT_STAGE_NUM 2
+#endif
+#define GU_XS_(x) #x
+#define GU_XS(x) GU_XS_(x)
+#define GU_W_(x) L##x
+#define GU_W(x) GU_W_(x)
+static const CHAR16 Stage2Path[]=L"\\GPU-UNLOCK\\STAGE" GU_W(GU_XS(GU_NEXT_STAGE_NUM)) L".EFI";
+static EFI_HANDLE Stage2Image;
+static EFI_DEVICE_PATH_PROTOCOL *Stage2DevicePath;
+static EFI_STATUS PreloadStage2(VOID) {
+  EFI_HANDLE *h=NULL;UINTN n=0,found=0;EFI_HANDLE vol=NULL;
+  EFI_STATUS s=Gu.bs->LocateHandleBuffer(ByProtocol,&FsGuid,NULL,&n,&h);
+  if(EFI_ERROR(s))return s;
+  if(!h||n>256){GuFree(h);return EFI_COMPROMISED_DATA;}
+  for(UINTN i=0;i<n;i++) {
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs=NULL;EFI_FILE_PROTOCOL *root=NULL,*file=NULL;
+    if(!GuIsBootVolume(h[i]))continue;
+    if(EFI_ERROR(Gu.bs->HandleProtocol(h[i],&FsGuid,(VOID**)&fs))||!fs||EFI_ERROR(fs->OpenVolume(fs,&root))||!root)continue;
+    if(!EFI_ERROR(root->Open(root,&file,(CHAR16*)Stage2Path,EFI_FILE_MODE_READ,0))&&file) {
+      UINT8 mz[2];UINTN bytes=2;
+      if(!EFI_ERROR(file->Read(file,&bytes,mz))&&bytes==2&&mz[0]=='M'&&mz[1]=='Z'){found++;vol=h[i];}
+      file->Close(file);
+    }
+    root->Close(root);
+  }
+  GuFree(h);GuLog("Stage2 candidates=%zu\n",(size_t)found);
+  if(found!=1)return found?EFI_NO_MAPPING:EFI_NOT_FOUND;
+  s=MakeFilePath(vol,Stage2Path,sizeof(Stage2Path),&Stage2DevicePath);if(EFI_ERROR(s))return s;
+  s=Gu.bs->LoadImage(FALSE,Gu.image,Stage2DevicePath,NULL,0,&Stage2Image);
+  GuLog("Stage2 LoadImage=%#llx\n",(unsigned long long)s);
+  return s;
+}
+#endif
 static EFI_STATUS ProbeWindowsBootVolume(EFI_HANDLE Handle,UINTN *Found) {
   EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs=NULL;EFI_FILE_PROTOCOL *root=NULL,*file=NULL;
   EFI_STATUS s=EFI_SUCCESS,x=Gu.bs->HandleProtocol(Handle,&FsGuid,(VOID**)&fs);

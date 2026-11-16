@@ -30,7 +30,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
         cd_text = (ROOT / "core_detector.py").read_text(encoding="utf-8")
         lp_text = (ROOT / "windows/uefi/source/unlock/local_profile.h").read_text(encoding="utf-8")
         app_text = (ROOT / "windows/uefi/source/unlock/app.c").read_text(encoding="utf-8")
-        self.assertIn("#define KOH_AUTOCONFIRM_MS 30000", cd_text)
+        self.assertIn("#define KOH_AUTOCONFIRM_MS {validated[\x27autoconfirm_ms\x27]}", cd_text)
         self.assertIn("#define KOH_AUTOCONFIRM_MS 30000", lp_text)
         self.assertIn("Press U once within 30s to start now", app_text)
 
@@ -601,7 +601,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
         3. Version is 1.2.9 across README.md, core_detector.py, and UEFI headers.
         """
         import struct, tempfile
-        self.assertEqual(core_detector.get_app_version(), "1.3.2")
+        self.assertEqual(core_detector.get_app_version(), "1.3.3")
         shstrtab = b"\x00.shstrtab\x00.fwimage\x00.fwsignature_tu10x\x00"
         while len(shstrtab) % 8 != 0:
             shstrtab += b"\x00"
@@ -741,7 +741,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
 
 
     def test_v131_copy_markdown_report_and_laptop_display_and_turing_desc(self) -> None:
-        """Verify v1.3.2 additions:
+        """Verify v1.3.3 additions:
         1. Copy Markdown Report button & localizations (EN/RU/ZH/HI) in both Windows and Linux UIs.
         2. format_markdown_report() output formatting.
         3. Laptop InsydeH2O ConSplitterDxe pathless virtual GOP skip in app.c.
@@ -780,7 +780,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
             platform_mode="windows",
             bench_banner="RTX 3050 Laptop GPU // MEASURED_UNLOCKED [Ratio: 1.00]",
         )
-        self.assertIn("## NVIDIA GPU Tensor Unlock — Diagnostic Report (`v1.3.2`)", md)
+        self.assertIn("## NVIDIA GPU Tensor Unlock — Diagnostic Report (`v1.3.3`)", md)
         self.assertIn("`NVIDIA GeForce RTX 3050 Laptop GPU` (Laptop / Mobile dGPU)", md)
         self.assertIn("`0x25a210de` / `0x16081025`", md)
         self.assertIn("| `FP16 -> FP32 (FMLA32)` | `FMLA32` | 25.10 TFLOP/s | 50.20 TFLOP/s | 50.20 TFLOP/s | **2.00x (+100.0%)** |", md)
@@ -795,6 +795,92 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
         app_src = (ROOT / "windows/uefi/source/unlock/app.c").read_text(encoding="utf-8")
         self.assertIn("display virtual pathless gop skipped", app_src)
 
+
+    def test_v133_internal_disk_boot_parsers_and_profile_macros(self):
+        """Verify v1.3.3 internal disk auto-unlock profile fields and language-independent parsers."""
+        cfg = {
+            "gpu_name": "NVIDIA GeForce RTX 4080",
+            "die_name": "AD103",
+            "board_id_hex": "0x270410de",
+            "subsystem_id_hex": "0x268819da",
+            "chip_id_hex": "0x193000a1",
+            "segment_hex": "0x0",
+            "bus_hex": "0x01",
+            "device_hex": "0x0",
+            "function_hex": "0x0",
+            "vram_min_hex": "0x3bf0",
+            "vram_max_hex": "0x4400",
+            "esp_guid": "{7a8150e0-c25f-4a16-9473-4a162c4d459a}",
+            "payload_esp_guid": "{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}",
+            "internal_disk_mode": True,
+        }
+        val = core_detector.validate_target_profile(cfg)
+        self.assertEqual(val["internal_disk_mode"], 1)
+        self.assertEqual(val["autoconfirm_ms"], 5000)
+        self.assertEqual(val["payload_esp_guid"], "{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}")
+        self.assertIn("0xaaaaaaaaU", val["payload_macro"])
+
+        fw_raw = """
+Firmware Boot Manager
+---------------------
+identifier              {fwbootmgr}
+displayorder            {11111111-2222-3333-4444-555555555555}
+                        {bootmgr}
+bootsequence            {11111111-2222-3333-4444-555555555555}
+timeout                 5
+"""
+        parsed_fw = core_detector.parse_bcdedit_fwbootmgr(fw_raw)
+        self.assertEqual(
+            parsed_fw["displayorder"],
+            ["{11111111-2222-3333-4444-555555555555}"],
+        )
+        self.assertEqual(
+            parsed_fw["bootsequence"],
+            ["{11111111-2222-3333-4444-555555555555}"],
+        )
+        self.assertEqual(parsed_fw["timeout"], 5)
+
+        all_raw = """
+------------------------
+идентификатор           {11111111-2222-3333-4444-555555555555}
+path                    \\EFI\\GPU-UNLOCK\\unlockx64.efi
+description             GPU Tensor Unlock
+------------------------
+identifier              {bootmgr}
+description             Windows Boot Manager
+"""
+        found = core_detector.parse_bcdedit_unlock_entries(all_raw)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["guid"], "{11111111-2222-3333-4444-555555555555}")
+
+        self.assertTrue(core_detector.parse_manage_bde_status("Protection Status: Protection On")["protection_on"])
+        self.assertFalse(core_detector.parse_manage_bde_status("Состояние защиты: Защита отключена")["protection_on"])
+
+    def test_v133_multi_gpu_chain_validation_and_build_order(self) -> None:
+        import unittest.mock as mock
+
+        c1 = {"gpu_name": "GPU 1", "segment_hex": "0x0000", "bus_hex": "0x01", "device_hex": "0x00", "function_hex": "0x0"}
+        c2 = {"gpu_name": "GPU 2", "segment_hex": "0x0000", "bus_hex": "0x02", "device_hex": "0x00", "function_hex": "0x0"}
+        c3 = {"gpu_name": "GPU 3", "segment_hex": "0x0000", "bus_hex": "0x03", "device_hex": "0x00", "function_hex": "0x0"}
+
+        with self.assertRaises(ValueError):
+            core_detector.build_and_stage_usb_multi([], "/tmp/fake")
+        with self.assertRaises(ValueError):
+            core_detector.build_and_stage_usb_multi([c1] * 9, "/tmp/fake")
+        with self.assertRaises(ValueError):
+            core_detector.build_and_stage_usb_multi([c1, dict(c1)], "/tmp/fake")
+
+        calls: list[tuple[int, int]] = []
+
+        def fake_stage(cfg, out, log_fn=print, target_mode="usb", chain_next=0, stage_num=1):
+            calls.append((stage_num, chain_next))
+            return Path(out)
+
+        with mock.patch.object(core_detector, "build_and_stage_usb", side_effect=fake_stage):
+            core_detector.build_and_stage_usb_multi([c1, c2, c3], "/tmp/fake", log_fn=lambda _: None)
+
+        # Must build tail-first: stage 3 (chain_next=0), stage 2 (chain_next=3), stage 1 (chain_next=2)
+        self.assertEqual(calls, [(3, 0), (2, 3), (1, 2)])
 
 if __name__ == "__main__":
 

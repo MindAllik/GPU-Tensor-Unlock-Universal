@@ -446,7 +446,7 @@ static int falcon_reset(struct unlock_transaction_work *work, const struct falco
 		return GU_RESULT(ret);
 	if (read_bar(work, eng->base + 0xf4, &hwcfg) || inaccessible(hwcfg))
 		return GU_RESULT(-EIO);
-	if (hwcfg & (1u << 10)) {
+	if (!is_tu102(work) && (hwcfg & (1u << 10))) {
 		if (read_bar(work, eng->falcon2 + 0x668, &bcr) || inaccessible(bcr))
 			return GU_RESULT(-ENODEV);
 		if ((bcr & 0x11) != 1) {
@@ -1676,7 +1676,7 @@ static int hold_sec2_reset(struct unlock_transaction_work *work, const char *pha
 		return GU_RESULT(ret);
 	if (read_bar(work, SEC2_BASE + 0xf4, &hwcfg) || inaccessible(hwcfg))
 		return GU_RESULT(-EIO);
-	if (hwcfg & (1u << 10)) {
+	if (!is_tu102(work) && (hwcfg & (1u << 10))) {
 		if (read_bar(work, SEC2_FALCON2 + 0x668, &bcr) || inaccessible(bcr))
 			return GU_RESULT(-ENODEV);
 		if ((bcr & 0x11) != 1) {

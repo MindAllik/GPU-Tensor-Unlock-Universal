@@ -512,6 +512,46 @@ int main(void) {
         )
         r_tu = subprocess.run([str(probe_tu_exe)], cwd=src_tu, capture_output=True, text=True, check=True)
         print(r_tu.stdout.strip())
+
+        # 8. Internal disk mode (KOH_INTERNAL_DISK_MODE=1) ATTEMPT.FLG safeguard lifecycle test
+        probe_int_c = work / "probe_internal.c"
+        probe_int_c.write_text("""
+#include "port.h"
+#include "app_io.h"
+int puts(const char *s);
+void abort(void);
+int main(void) {
+    if (KOH_INTERNAL_DISK_MODE != 1 || KOH_AUTOCONFIRM_MS != 5000) abort();
+    if (GuAttemptFlagPresent()) abort();
+    GuAttemptFlagClear();
+    puts("Internal disk mode (KOH_INTERNAL_DISK_MODE=1) & ATTEMPT.FLG safeguard link/check PASS");
+    return 0;
+}
+""")
+        prof_int = work / "prof_int"
+        prof_int.mkdir()
+        (prof_int / "local_profile.h").write_text("""#pragma once
+#define GU_BOARD_ID 0x270410deU
+#define GU_BOARD_SUBSYSTEM 0x268819daU
+#define GU_BOARD_CHIP 0x193000a1U
+#define GU_ARCH_ADA 1
+#define GU_ARCH_TURING 0
+#define KOH_WINDOWS_ESP_GUID 0xc70266a8U,0x85cfU,0x45d9U,{0x8d,0x4c,0x6b,0xa5,0x74,0x21,0xf5,0x5a}
+#define KOH_PAYLOAD_ESP_GUID 0xc70266a9U,0x85cfU,0x45d9U,{0x8d,0x4c,0x6b,0xa5,0x74,0x21,0xf5,0x5a}
+#define KOH_INTERNAL_DISK_MODE 1
+#define KOH_AUTOCONFIRM_MS 5000
+""")
+        src_int = work / "src_int"
+        shutil.copytree(src, src_int)
+        shutil.copy2(prof_int / "local_profile.h", src_int / "unlock" / "local_profile.h")
+        probe_int_exe = work / "probe_internal_asan"
+        subprocess.run(
+            ["gcc", f"-I{prof_int}", *asan_flags, str(probe_int_c), "unlock/app_io.c", "unlock/compat.c", "unlock/format.c", "unlock/sha256.c", "unlock/port.c", "unlock/runtime.c", "-o", str(probe_int_exe)],
+            cwd=src_int,
+            check=True,
+        )
+        r_int = subprocess.run([str(probe_int_exe)], cwd=src_int, capture_output=True, text=True, check=True)
+        print(r_int.stdout.strip())
         return 0
 
 

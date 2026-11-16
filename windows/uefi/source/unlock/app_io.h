@@ -13,3 +13,6 @@ VOID GuReleaseAssets(VOID);
 BOOLEAN GuLogReady(VOID);
 extern BOOLEAN GuScreenDetached;
 VOID GuConsole(const char *Text);
+BOOLEAN GuAttemptFlagPresent(VOID);
+EFI_STATUS GuAttemptFlagSet(VOID);
+VOID GuAttemptFlagClear(VOID);

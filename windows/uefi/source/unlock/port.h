@@ -8,7 +8,7 @@
 #include "local_profile.h"
 
 #ifndef GU_APP_VERSION
-#define GU_APP_VERSION "1.3.2"
+#define GU_APP_VERSION "1.3.3"
 #endif
 
 #ifndef GU_BOARD_ID
@@ -61,6 +61,9 @@
 #endif
 #ifndef KOH_UNATTENDED_AUTOFIRE
 #define KOH_UNATTENDED_AUTOFIRE 0
+#endif
+#ifndef KOH_INTERNAL_DISK_MODE
+#define KOH_INTERNAL_DISK_MODE 0
 #endif
 
 typedef enum {
