@@ -8,7 +8,7 @@
 #include "local_profile.h"
 
 #ifndef GU_APP_VERSION
-#define GU_APP_VERSION "1.3.3"
+#define GU_APP_VERSION "1.3.4"
 #endif
 
 #ifndef GU_BOARD_ID

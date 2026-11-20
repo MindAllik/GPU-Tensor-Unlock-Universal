@@ -36,7 +36,7 @@ def get_app_version() -> str:
         m = re.search(r"\*\*Version:\s*([0-9]+\.[0-9]+\.[0-9]+)\*\*", readme.read_text(encoding="utf-8", errors="replace"))
         if m:
             return m.group(1)
-    return "1.3.3"
+    return "1.3.4"
 
 
 APP_VERSION: str = get_app_version()
@@ -299,7 +299,7 @@ ASSET_SPECS_GA = {
 
 ASSET_SPECS_TU = {
     "booter_load_tu102.bin": (59224, "51507de61777cf46f3703a084cdfa896c21f6bc0c8af8f245bd09b2e9c49bf54"),
-    "v67-tu102-610.43.03.bin": (64000, "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024"),
+    "v67-tu102-610.43.03.bin": (64000, "6f121ea4c482d3929032d006cf2eac644c3c63c874625a84acba8eb1631fdf60"),
     "gsp_tu10x.bin": (29352832, "73065619db9ec921d19fc4e519dd04d91a9199b525eaca9b257b89fb8c5ec52c"),
     "gsp_boot_tu102.bin": (4096, "8765694cd38beaa4e2b8b1b83a31fb7aee6cb9d8b7c6bc7a86e6d931a3a056c2"),
     "gsp_boot_desc_tu102.bin": (76, "9e7cca2cfdc5ce601b0adba39967850046108df6c2d23fff95578ca3f0ccbe01"),
@@ -388,38 +388,43 @@ AD102_PATCHED_WORDS = {
 }
 
 
-TU102_PATCHED_WORDS = {
+TU102_PATCHED_WORDS: dict[int, int] = {
     0x1100: 0x00000007,
     0xF938: 0x00006140,
-    0xF940: 0x001FA7CC,
-    0xF944: 0xFFFFF0FF,
+    0xF940: 0x00409650,
+    0xF944: 0xFFFFFFFF,
     0xF94C: 0x000010B9,
     0xF950: 0x00006140,
-    0xF958: 0x00409650,
-    0xF95C: 0xFFFFFFFF,
+    0xF958: 0x001FA828,
+    0xF95C: 0x00000000,
     0xF964: 0x000010B9,
     0xF968: 0x00006140,
-    0xF970: 0x00409650,
-    0xF974: 0xFFFFFFFF,
-    0xF97C: 0x000010B9,
-    0xF980: 0x00006140,
-    0xF988: 0x00409650,
-    0xF98C: 0xFFFFFFFF,
-    0xF994: 0x000010B9,
+    0xF974: 0x00000000,
+    0xF97C: 0x00000CBD,
+    0xF980: 0x00000001,
+    0xF984: 0x00000000,
+    0xF988: 0x00008E18,
+    0xF98C: 0x00000000,
+    0xF994: 0x00000C95,
     0xF998: 0x00006140,
-    0xF9A0: 0x00409650,
-    0xF9A4: 0xFFFFFFFF,
-    0xF9AC: 0x000010B9,
+    0xF99C: 0x00000000,
+    0xF9A0: 0x00000000,
+    0xF9A4: 0x00000001,
+    0xF9AC: 0x00001F89,
     0xF9B0: 0x00006140,
-    0xF9B8: 0x00409650,
-    0xF9BC: 0xFFFFFFFF,
-    0xF9C4: 0x000010B9,
+    0xF9B4: 0x00006140,
+    0xF9B8: 0x0000FFFF,
+    0xF9C0: 0x00001F89,
+    0xF9C4: 0x00006140,
     0xF9C8: 0x00006140,
-    0xF9D4: 0x00000003,
-    0xF9DC: 0x00006521,
-    0xF9E0: 0x00007F27,
-    0xF9EC: 0x00000CCB,
-    0xF9F0: 0x00007EA4,
+    0xF9CC: 0x00000000,
+    0xF9D4: 0x00000E85,
+    0xF9D8: 0x00001F89,
+    0xF9DC: 0x00006140,
+    0xF9E0: 0x00006140,
+    0xF9E4: 0x00000000,
+    0xF9EC: 0x00007EA4,
+    0xF9F8: 0x00000000,
 }
 
 
@@ -532,7 +537,7 @@ def verify_compiled_efi_profile(efi_bytes: bytes, validated: dict[str, Any]) -> 
             raise RuntimeError(
                 f"Compiled BOOTX64.EFI does not contain target KOH_PAYLOAD_ESP_GUID {validated['payload_esp_guid']}!"
             )
-    if (validated['board_id'], validated['subsys_id']) != (0x278210DE, 0xF2941569):
+    if validated['subsys_id'] != 0xF2941569:
         if struct.pack("<I", 0xF2941569) in efi_bytes:
             raise RuntimeError(
                 "Compiled BOOTX64.EFI still contains default template subsystem 0xf2941569!"
@@ -4116,6 +4121,7 @@ def install_internal_boot_unlock(
     target_info: dict[str, Any],
     boot_mode: str = "persistent",
     log_fn: Callable[[str], None] = print,
+    multi_configs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build KOH_INTERNAL_DISK_MODE=1 EFI, stage assets onto an internal FAT32 volume, and register {fwbootmgr}."""
     if not sys.platform.startswith("win"):
@@ -4146,13 +4152,20 @@ def install_internal_boot_unlock(
         raise RuntimeError(f"BCD backup failed: {(r_exp.stderr or r_exp.stdout).strip()}")
     log_fn(f"[BACKUP] Exported BCD store backup to {backup_bcd}")
 
-    cfg = dict(config)
-    cfg["internal_disk_mode"] = True
-    cfg.setdefault("autoconfirm_ms", 5000)
-    if target_info.get("guid"):
-        cfg["payload_esp_guid"] = target_info["guid"]
+    def _prep_internal_cfg(base_c: dict[str, Any]) -> dict[str, Any]:
+        c = dict(base_c)
+        c["internal_disk_mode"] = True
+        c.setdefault("autoconfirm_ms", 5000)
+        if target_info.get("guid"):
+            c["payload_esp_guid"] = target_info["guid"]
+        return c
 
-    staged_root = build_and_stage_usb(cfg, f"{target_letter}\\", log_fn=log_fn, target_mode="export")
+    if multi_configs and len(multi_configs) >= 2:
+        prepared_multi = [_prep_internal_cfg(c) for c in multi_configs]
+        staged_root = build_and_stage_usb_multi(prepared_multi, f"{target_letter}\\", log_fn=log_fn, target_mode="export")
+    else:
+        cfg = _prep_internal_cfg(config)
+        staged_root = build_and_stage_usb(cfg, f"{target_letter}\\", log_fn=log_fn, target_mode="export")
 
     # Copy staged BOOTX64.EFI also to \EFI\GPU-UNLOCK\unlockx64.efi so Windows stock \EFI\Boot\BOOTX64.EFI is untouched
     src_efi = staged_root / "EFI" / "Boot" / "BOOTX64.EFI"
@@ -4305,6 +4318,16 @@ def uninstall_internal_boot_unlock(log_fn: Callable[[str], None] = print) -> dic
             if sub.exists() and not _is_reparse_or_symlink(sub):
                 shutil.rmtree(sub, ignore_errors=True)
                 log_fn(f"[OK] Cleaned staged directory {sub}")
+        # Remove our own staged fallback EFI\Boot\BOOTX64.EFI only if its SHA-256 matches our manifest
+        own_sha = str(man.get("efi_sha256") or "").lower()
+        fallback_efi = proot / "EFI" / "Boot" / "BOOTX64.EFI"
+        if own_sha and fallback_efi.is_file() and not _is_reparse_or_symlink(fallback_efi):
+            try:
+                if sha256_file(fallback_efi).lower() == own_sha:
+                    fallback_efi.unlink()
+                    log_fn(f"[OK] Removed our staged fallback {fallback_efi}")
+            except Exception:
+                pass
 
     mp = _internal_boot_manifest_path()
     if mp.exists():

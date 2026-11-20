@@ -229,7 +229,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
         self.assertEqual(len(v67_tu), 64000)
         self.assertEqual(
             core_detector.sha256_bytes(v67_tu),
-            "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024",
+            "6f121ea4c482d3929032d006cf2eac644c3c63c874625a84acba8eb1631fdf60",
         )
         # Verify real NVIDIA 610.43.03 BooterLoadUcode_TU102.c SHA-256 and non-PROD UCODE_IMAGE/UCODE_DESC fallback
         self.assertEqual(
@@ -601,7 +601,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
         3. Version is 1.2.9 across README.md, core_detector.py, and UEFI headers.
         """
         import struct, tempfile
-        self.assertEqual(core_detector.get_app_version(), "1.3.3")
+        self.assertEqual(core_detector.get_app_version(), "1.3.4")
         shstrtab = b"\x00.shstrtab\x00.fwimage\x00.fwsignature_tu10x\x00"
         while len(shstrtab) % 8 != 0:
             shstrtab += b"\x00"
@@ -741,7 +741,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
 
 
     def test_v131_copy_markdown_report_and_laptop_display_and_turing_desc(self) -> None:
-        """Verify v1.3.3 additions:
+        """Verify v1.3.4 additions:
         1. Copy Markdown Report button & localizations (EN/RU/ZH/HI) in both Windows and Linux UIs.
         2. format_markdown_report() output formatting.
         3. Laptop InsydeH2O ConSplitterDxe pathless virtual GOP skip in app.c.
@@ -780,7 +780,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
             platform_mode="windows",
             bench_banner="RTX 3050 Laptop GPU // MEASURED_UNLOCKED [Ratio: 1.00]",
         )
-        self.assertIn("## NVIDIA GPU Tensor Unlock — Diagnostic Report (`v1.3.3`)", md)
+        self.assertIn("## NVIDIA GPU Tensor Unlock — Diagnostic Report (`v1.3.4`)", md)
         self.assertIn("`NVIDIA GeForce RTX 3050 Laptop GPU` (Laptop / Mobile dGPU)", md)
         self.assertIn("`0x25a210de` / `0x16081025`", md)
         self.assertIn("| `FP16 -> FP32 (FMLA32)` | `FMLA32` | 25.10 TFLOP/s | 50.20 TFLOP/s | 50.20 TFLOP/s | **2.00x (+100.0%)** |", md)
@@ -797,7 +797,7 @@ class LinuxAutoDetectionAndIntegrationTests(unittest.TestCase):
 
 
     def test_v133_internal_disk_boot_parsers_and_profile_macros(self):
-        """Verify v1.3.3 internal disk auto-unlock profile fields and language-independent parsers."""
+        """Verify v1.3.4 internal disk auto-unlock profile fields and language-independent parsers."""
         cfg = {
             "gpu_name": "NVIDIA GeForce RTX 4080",
             "die_name": "AD103",
@@ -881,6 +881,48 @@ description             Windows Boot Manager
 
         # Must build tail-first: stage 3 (chain_next=0), stage 2 (chain_next=3), stage 1 (chain_next=2)
         self.assertEqual(calls, [(3, 0), (2, 3), (1, 2)])
+
+    def test_v133_rtx3090ti_template_subsys_validation(self) -> None:
+        """Regression test: valid GPU with subsys_id 0xf2941569 (e.g. RTX 3090 Ti) must pass,
+        while missing IDs or unexpected template subsys_id in other profiles must fail."""
+        import struct
+
+        rtx3090ti = {
+            "gpu_name": "NVIDIA GeForce RTX 3090 Ti",
+            "die_name": "GA102",
+            "is_ada": False,
+            "board_id_hex": "0x220310de",
+            "subsystem_id_hex": "0xf2941569",
+            "segment_hex": "0x0000",
+            "bus_hex": "0x08",
+            "device_hex": "0x00",
+            "function_hex": "0x0",
+            "chip_id_hex": "0x172000a1",
+            "vram_min_hex": "0x5c00",
+            "vram_max_hex": "0x6400",
+            "esp_guid": "AUTO",
+        }
+        v3090 = core_detector.validate_target_profile(rtx3090ti)
+        pci_3090 = struct.pack("<I", 0x220310DE)
+        sub_tmpl = struct.pack("<I", 0xF2941569)
+        ctrl_sub = struct.pack("<I", 0x12341462)
+
+        # 1. Both RTX 3090 Ti identifiers present -> passes
+        core_detector.verify_compiled_efi_profile(pci_3090 + sub_tmpl, v3090)
+        # 2. Only PCI ID -> missing GU_BOARD_SUBSYSTEM
+        with self.assertRaisesRegex(RuntimeError, "GU_BOARD_SUBSYSTEM"):
+            core_detector.verify_compiled_efi_profile(pci_3090, v3090)
+        # 3. Only SUBSYS -> missing GU_BOARD_ID
+        with self.assertRaisesRegex(RuntimeError, "GU_BOARD_ID"):
+            core_detector.verify_compiled_efi_profile(sub_tmpl, v3090)
+
+        ctrl = dict(rtx3090ti, subsystem_id_hex="0x12341462")
+        vctrl = core_detector.validate_target_profile(ctrl)
+        # 4. Control profile with both identifiers -> passes
+        core_detector.verify_compiled_efi_profile(pci_3090 + ctrl_sub, vctrl)
+        # 5. Control profile containing unexpected template SUBSYS -> rejects
+        with self.assertRaisesRegex(RuntimeError, "default template subsystem 0xf2941569"):
+            core_detector.verify_compiled_efi_profile(pci_3090 + ctrl_sub + sub_tmpl, vctrl)
 
 if __name__ == "__main__":
 

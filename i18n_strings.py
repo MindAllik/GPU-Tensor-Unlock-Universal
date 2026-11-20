@@ -26,7 +26,7 @@ I18N: dict[str, dict[str, str]] = {
         "confirm_uninstall_internal_title": "Uninstall Auto-Unlock",
         "confirm_uninstall_internal_msg": "Remove the GPU Tensor Unlock UEFI boot entry from {fwbootmgr} and clean staged files?",
 
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.3 // UNIVERSAL CONSOLE [WINDOWS 10 / 11]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.4 // UNIVERSAL CONSOLE [WINDOWS 10 / 11]",
         "subtitle": "Pre-Boot UEFI FMLA32 Speed-Select Unlocker for Ada Lovelace (RTX 40xx), Ampere (RTX 30xx) & Turing (RTX 20xx)",
         "issues_note": "If you encounter any issues, please describe them in the project's GitHub Issues — your feedback is very valuable to me!",
         "lang_label": "LANGUAGE:",
@@ -113,7 +113,7 @@ I18N: dict[str, dict[str, str]] = {
         "confirm_uninstall_internal_title": "Удаление автоактивации",
         "confirm_uninstall_internal_msg": "Удалить запись GPU Tensor Unlock из {fwbootmgr} и очистить файлы загрузки с диска?",
 
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.3 // УНИВЕРСАЛЬНАЯ КОНСОЛЬ [WINDOWS 10 / 11]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.4 // УНИВЕРСАЛЬНАЯ КОНСОЛЬ [WINDOWS 10 / 11]",
         "subtitle": "UEFI-разблокировщик селекторов FMLA32 для видеокарт Ada Lovelace (RTX 40xx), Ampere (RTX 30xx) и Turing (RTX 20xx)",
         "issues_note": "Если у вас возникли какие-то проблемы, пожалуйста, опишите их в Issues проекта на GitHub — это очень ценно для меня!",
         "lang_label": "ЯЗЫК / LANG:",
@@ -200,7 +200,7 @@ I18N: dict[str, dict[str, str]] = {
         "confirm_uninstall_internal_title": "卸载自动解锁",
         "confirm_uninstall_internal_msg": "从 {fwbootmgr} 删除 GPU Tensor Unlock 启动项并清理磁盘上的引导文件？",
 
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.3 // 通用控制台 [WINDOWS 10 / 11]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.4 // 通用控制台 [WINDOWS 10 / 11]",
         "subtitle": "适用于 Ada Lovelace (RTX 40系)、Ampere (RTX 30系) 与 Turing (RTX 20系) 的 UEFI 预启动 FMLA32 算力解锁工具",
         "issues_note": "如果您遇到任何问题，请在项目的 GitHub Issues 中描述并反馈，这对我非常宝贵！",
         "lang_label": "语言 / LANG:",
@@ -286,7 +286,7 @@ I18N: dict[str, dict[str, str]] = {
         "confirm_uninstall_internal_title": "ऑटो-अनलॉक हटाएं",
         "confirm_uninstall_internal_msg": "{fwbootmgr} से GPU Tensor Unlock प्रविष्टि हटाएं और डिस्क फ़ाइलें साफ़ करें?",
 
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.3 // यूनिवर्सल कंसोल [WINDOWS 10 / 11]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.4 // यूनिवर्सल कंसोल [WINDOWS 10 / 11]",
         "subtitle": "Ada Lovelace (RTX 40xx), Ampere (RTX 30xx) और Turing (RTX 20xx) के लिए UEFI प्री-बूट FMLA32 अनलॉकर",
         "issues_note": "यदि आपको कोई समस्या आती है, तो कृपया प्रोजेक्ट के GitHub Issues में उसका वर्णन करें — यह मेरे लिए बहुत मूल्यवान है!",
         "lang_label": "भाषा / LANG:",
@@ -379,7 +379,7 @@ OS_MISMATCH_MESSAGES: dict[str, dict[str, str]] = {
 
 I18N_LINUX: dict[str, dict[str, str]] = {
     "EN": {
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.3 // LINUX KERNEL MODULE CONSOLE",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.4 // LINUX KERNEL MODULE CONSOLE",
         "subtitle": "Kernel Module (gpu_unlock.ko) & RM Selector Unlocker for Ada Lovelace (RTX 40xx), Ampere (RTX 30xx) & Turing (RTX 20xx)",
         "issues_note": "If you encounter any issues, please describe them in the project's GitHub Issues — your feedback is very valuable to me!",
         "lang_label": "LANGUAGE:",
@@ -435,7 +435,7 @@ I18N_LINUX: dict[str, dict[str, str]] = {
         "busy_close_msg": "A background task is currently running. Please wait for it to finish before closing the window.",
     },
     "RU": {
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.3 // КОНСОЛЬ LINUX [KERNEL MODULE GPU_UNLOCK.KO]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.4 // КОНСОЛЬ LINUX [KERNEL MODULE GPU_UNLOCK.KO]",
         "subtitle": "Ядерный разблокировщик селекторов FMLA32 (gpu_unlock.ko + RM ioctl) для видеокарт Ada Lovelace, Ampere и Turing",
         "issues_note": "Если у вас возникли какие-то проблемы, пожалуйста, опишите их в Issues проекта на GitHub — это очень ценно для меня!",
         "lang_label": "ЯЗЫК / LANG:",
@@ -491,7 +491,7 @@ I18N_LINUX: dict[str, dict[str, str]] = {
         "busy_close_msg": "Дождитесь завершения текущей фоновой операции перед закрытием окна.",
     },
     "ZH": {
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.3 // LINUX 内核模块控制台 [GPU_UNLOCK.KO]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.4 // LINUX 内核模块控制台 [GPU_UNLOCK.KO]",
         "subtitle": "适用于 Ada Lovelace、Ampere 与 Turing 的 Linux 内核模块 (gpu_unlock.ko) 与 RM 选择器解锁工具",
         "issues_note": "如果您遇到任何问题，请在项目的 GitHub Issues 中描述并反馈，这对我非常宝贵！",
         "lang_label": "语言 / LANG:",
@@ -547,7 +547,7 @@ I18N_LINUX: dict[str, dict[str, str]] = {
         "busy_close_msg": "后台任务正在运行，请等待完成后再关闭窗口。",
     },
     "HI": {
-        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.3 // LINUX कर्नेल मॉड्यूल कंसोल [GPU_UNLOCK.KO]",
+        "app_title": "NVIDIA GPU TENSOR UNLOCK v1.3.4 // LINUX कर्नेल मॉड्यूल कंसोल [GPU_UNLOCK.KO]",
         "subtitle": "Ada Lovelace, Ampere और Turing के लिए कर्नेल मॉड्यूल (gpu_unlock.ko) और RM सेलेक्टर अनलॉकर",
         "issues_note": "यदि आपको कोई समस्या आती है, तो कृपया प्रोजेक्ट के GitHub Issues में उसका वर्णन करें — यह मेरे लिए बहुत मूल्यवान है!",
         "lang_label": "भाषा / LANG:",

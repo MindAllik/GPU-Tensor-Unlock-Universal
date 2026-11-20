@@ -1204,6 +1204,14 @@ class UniversalUnlockApp(tk.Tk):
             return
 
         cfg = self._collect_profile_cfg()
+        multi_cfgs: list[dict[str, Any]] | None = None
+        if self.var_multi_gpu.get():
+            try:
+                multi_cfgs = self._collect_all_gpu_cfgs()
+            except Exception as exc:
+                messagebox.showerror("Invalid Profile", str(exc))
+                self.log(f"[ERROR] Multi-GPU profile validation failed: {exc}")
+                return
         self._set_busy(True)
 
         def _worker() -> None:
@@ -1214,7 +1222,9 @@ class UniversalUnlockApp(tk.Tk):
                 if prereq.get("fast_startup_enabled"):
                     core_detector.disable_windows_fast_startup()
                     self.log("[OK] Disabled Windows Fast Startup (HiberbootEnabled=0) for reliable cold-boot unlock.")
-                res = core_detector.install_internal_boot_unlock(cfg, target, boot_mode="persistent", log_fn=self.log)
+                res = core_detector.install_internal_boot_unlock(
+                    cfg, target, boot_mode="persistent", log_fn=self.log, multi_configs=multi_cfgs
+                )
                 self.log(f"[SUCCESS] Internal auto-unlock installed on {res['target_letter']} (GUID={res['entry_guid']}).")
                 self.boot_prereq = core_detector.check_windows_boot_prerequisites()
                 self.after(0, self._refresh_internal_boot_status)
@@ -1254,12 +1264,35 @@ class UniversalUnlockApp(tk.Tk):
         if not target:
             messagebox.showerror("Internal FAT32", t["err_no_internal_target"])
             return
+        if prereq.get("secure_boot"):
+            if not messagebox.askyesno(t["warn_secureboot_title"], t["warn_secureboot_msg"]):
+                return
+        suspend_bl = False
+        if prereq.get("bitlocker_on"):
+            if messagebox.askyesno(t["warn_bitlocker_title"], t["warn_bitlocker_msg"]):
+                suspend_bl = True
         cfg = self._collect_profile_cfg()
+        multi_cfgs: list[dict[str, Any]] | None = None
+        if self.var_multi_gpu.get():
+            try:
+                multi_cfgs = self._collect_all_gpu_cfgs()
+            except Exception as exc:
+                messagebox.showerror("Invalid Profile", str(exc))
+                self.log(f"[ERROR] Multi-GPU profile validation failed: {exc}")
+                return
         self._set_busy(True)
 
         def _worker_install_oneshot() -> None:
             try:
-                res = core_detector.install_internal_boot_unlock(cfg, target, boot_mode="oneshot", log_fn=self.log)
+                if suspend_bl:
+                    core_detector.suspend_bitlocker_for_reboot("C:", 1)
+                    self.log("[OK] Suspended BitLocker protection for 1 reboot.")
+                if prereq.get("fast_startup_enabled"):
+                    core_detector.disable_windows_fast_startup()
+                    self.log("[OK] Disabled Windows Fast Startup (HiberbootEnabled=0) for reliable cold-boot unlock.")
+                res = core_detector.install_internal_boot_unlock(
+                    cfg, target, boot_mode="oneshot", log_fn=self.log, multi_configs=multi_cfgs
+                )
                 self.log(f"[SUCCESS] One-shot BootNext armed on {res['target_letter']} (GUID={res['entry_guid']}).")
                 self.boot_prereq = core_detector.check_windows_boot_prerequisites()
                 self.after(0, self._refresh_internal_boot_status)

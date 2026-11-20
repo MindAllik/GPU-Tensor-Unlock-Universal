@@ -1848,6 +1848,12 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 	dev_info(&work->pdev->dev,
 		 "post-unlock Turing SEC2 reset released, FLR skipped, WPR2=%08x:%08x PLM=%#x SS0=%08x SS1=%08x\n",
 		 lo, hi, plm, ss0, ss1);
+	if (hi >> 4) {
+		dev_err(&work->pdev->dev,
+			"Turing WPR2 still enabled: lo=%#x hi=%#x; stock driver requires HI.VAL=0\n",
+			lo, hi);
+		return GU_RESULT(-EBUSY);
+	}
 	if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK)
 		return GU_RESULT(-EIO);
 	work->quiesced = true;

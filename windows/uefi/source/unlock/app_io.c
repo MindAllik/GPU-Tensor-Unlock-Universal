@@ -44,7 +44,7 @@ typedef struct {const char *name;CHAR16 *file;UINTN size;const char *hash;} ASSE
 #endif
 static const ASSET_SPEC Specs[]={
  {"gpu-unlock/610.43.03/booter_load_tu102.bin",L"ASSETS\\booter_load_tu102.bin",GU_TU102_BOOTER_SIZE,GU_TU102_BOOTER_HASH},
- {"gpu-unlock/610.43.03/v67-tu102-610.43.03.bin",L"ASSETS\\v67-tu102-610.43.03.bin",64000,"54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024"},
+ {"gpu-unlock/610.43.03/v67-tu102-610.43.03.bin",L"ASSETS\\v67-tu102-610.43.03.bin",64000,"6f121ea4c482d3929032d006cf2eac644c3c63c874625a84acba8eb1631fdf60"},
  {"gpu-unlock/610.43.03/gsp_tu10x.bin",L"ASSETS\\gsp_tu10x.bin",GU_TU102_GSP_SIZE,GU_TU102_GSP_HASH},
  {"gpu-unlock/610.43.03/gsp_boot_tu102.bin",L"ASSETS\\gsp_boot_tu102.bin",GU_TU102_BOOT_SIZE,GU_TU102_BOOT_HASH},
  {"gpu-unlock/610.43.03/gsp_boot_desc_tu102.bin",L"ASSETS\\gsp_boot_desc_tu102.bin",GU_TU102_BOOT_DESC_SIZE,GU_TU102_BOOT_DESC_HASH}

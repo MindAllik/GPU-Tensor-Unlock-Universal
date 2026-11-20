@@ -33,6 +33,6 @@
     "filename": "v67-tu102-610.43.03.bin",
     "generator": "firmware/generate_v67.py --arch tu102",
     "size": 64000,
-    "sha256": "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024"
+    "sha256": "6f121ea4c482d3929032d006cf2eac644c3c63c874625a84acba8eb1631fdf60"
   }
 }

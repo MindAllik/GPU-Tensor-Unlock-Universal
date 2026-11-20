@@ -42,13 +42,13 @@ class FirmwareTests(unittest.TestCase):
         turing_entry = self.turing_manifest["payload"]
         digest = hashlib.sha256(payload).hexdigest()
         self.assertEqual(len(payload), 64000)
-        self.assertEqual(digest, "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024")
+        self.assertEqual(digest, "6f121ea4c482d3929032d006cf2eac644c3c63c874625a84acba8eb1631fdf60")
         self.assertEqual(digest, generate_v67.TU102_PAYLOAD_SHA256)
         self.assertEqual(digest, entry["sha256"])
         self.assertEqual(digest, turing_entry["sha256"])
         overrides = {int(word["offset"], 0): int(word["value"], 0)
                      for word in entry["overrides"]}
-        self.assertEqual(len(overrides), 31)
+        self.assertEqual(len(overrides), 36)
         for offset in range(0, len(payload), 4):
             self.assertEqual(struct.unpack_from("<I", payload, offset)[0],
                              overrides.get(offset, 0x4a7), hex(offset))

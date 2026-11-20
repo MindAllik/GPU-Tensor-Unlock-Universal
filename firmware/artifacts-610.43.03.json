@@ -404,131 +404,151 @@
     "dmem_base": "0x00000600",
     "overrides": [
       {
-        "offset": "0x00001100",
+        "offset": "0x1100",
         "value": "0x00000007"
       },
       {
-        "offset": "0x0000f938",
+        "offset": "0xf938",
         "value": "0x00006140"
       },
       {
-        "offset": "0x0000f940",
-        "value": "0x001fa7cc"
-      },
-      {
-        "offset": "0x0000f944",
-        "value": "0xfffff0ff"
-      },
-      {
-        "offset": "0x0000f94c",
-        "value": "0x000010b9"
-      },
-      {
-        "offset": "0x0000f950",
-        "value": "0x00006140"
-      },
-      {
-        "offset": "0x0000f958",
+        "offset": "0xf940",
         "value": "0x00409650"
       },
       {
-        "offset": "0x0000f95c",
+        "offset": "0xf944",
         "value": "0xffffffff"
       },
       {
-        "offset": "0x0000f964",
+        "offset": "0xf94c",
         "value": "0x000010b9"
       },
       {
-        "offset": "0x0000f968",
+        "offset": "0xf950",
         "value": "0x00006140"
       },
       {
-        "offset": "0x0000f970",
-        "value": "0x00409650"
+        "offset": "0xf958",
+        "value": "0x001fa828"
       },
       {
-        "offset": "0x0000f974",
-        "value": "0xffffffff"
+        "offset": "0xf95c",
+        "value": "0x00000000"
       },
       {
-        "offset": "0x0000f97c",
+        "offset": "0xf964",
         "value": "0x000010b9"
       },
       {
-        "offset": "0x0000f980",
+        "offset": "0xf968",
         "value": "0x00006140"
       },
       {
-        "offset": "0x0000f988",
-        "value": "0x00409650"
+        "offset": "0xf974",
+        "value": "0x00000000"
       },
       {
-        "offset": "0x0000f98c",
-        "value": "0xffffffff"
+        "offset": "0xf97c",
+        "value": "0x00000cbd"
       },
       {
-        "offset": "0x0000f994",
-        "value": "0x000010b9"
+        "offset": "0xf980",
+        "value": "0x00000001"
       },
       {
-        "offset": "0x0000f998",
+        "offset": "0xf984",
+        "value": "0x00000000"
+      },
+      {
+        "offset": "0xf988",
+        "value": "0x00008e18"
+      },
+      {
+        "offset": "0xf98c",
+        "value": "0x00000000"
+      },
+      {
+        "offset": "0xf994",
+        "value": "0x00000c95"
+      },
+      {
+        "offset": "0xf998",
         "value": "0x00006140"
       },
       {
-        "offset": "0x0000f9a0",
-        "value": "0x00409650"
+        "offset": "0xf99c",
+        "value": "0x00000000"
       },
       {
-        "offset": "0x0000f9a4",
-        "value": "0xffffffff"
+        "offset": "0xf9a0",
+        "value": "0x00000000"
       },
       {
-        "offset": "0x0000f9ac",
-        "value": "0x000010b9"
+        "offset": "0xf9a4",
+        "value": "0x00000001"
       },
       {
-        "offset": "0x0000f9b0",
+        "offset": "0xf9ac",
+        "value": "0x00001f89"
+      },
+      {
+        "offset": "0xf9b0",
         "value": "0x00006140"
       },
       {
-        "offset": "0x0000f9b8",
-        "value": "0x00409650"
-      },
-      {
-        "offset": "0x0000f9bc",
-        "value": "0xffffffff"
-      },
-      {
-        "offset": "0x0000f9c4",
-        "value": "0x000010b9"
-      },
-      {
-        "offset": "0x0000f9c8",
+        "offset": "0xf9b4",
         "value": "0x00006140"
       },
       {
-        "offset": "0x0000f9d4",
-        "value": "0x00000003"
+        "offset": "0xf9b8",
+        "value": "0x0000ffff"
       },
       {
-        "offset": "0x0000f9dc",
-        "value": "0x00006521"
+        "offset": "0xf9c0",
+        "value": "0x00001f89"
       },
       {
-        "offset": "0x0000f9e0",
-        "value": "0x00007f27"
+        "offset": "0xf9c4",
+        "value": "0x00006140"
       },
       {
-        "offset": "0x0000f9ec",
-        "value": "0x00000ccb"
+        "offset": "0xf9c8",
+        "value": "0x00006140"
       },
       {
-        "offset": "0x0000f9f0",
+        "offset": "0xf9cc",
+        "value": "0x00000000"
+      },
+      {
+        "offset": "0xf9d4",
+        "value": "0x00000e85"
+      },
+      {
+        "offset": "0xf9d8",
+        "value": "0x00001f89"
+      },
+      {
+        "offset": "0xf9dc",
+        "value": "0x00006140"
+      },
+      {
+        "offset": "0xf9e0",
+        "value": "0x00006140"
+      },
+      {
+        "offset": "0xf9e4",
+        "value": "0x00000000"
+      },
+      {
+        "offset": "0xf9ec",
         "value": "0x00007ea4"
+      },
+      {
+        "offset": "0xf9f8",
+        "value": "0x00000000"
       }
     ],
-    "sha256": "54513477ba4da9922fe00678ae390b1ec5136353989b23238c3524a69c7a8024",
+    "sha256": "6f121ea4c482d3929032d006cf2eac644c3c63c874625a84acba8eb1631fdf60",
     "generator": "firmware/generate_v67.py:build_tu102_payload",
     "provenance": {
       "name": "Zagitta/gpu-unlock & xrip/cmp50hx-unlock",
